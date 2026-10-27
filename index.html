@@ -18,6 +18,10 @@
 <!-- フォント：源ノ角ゴシック（端末に入っていればそれを使い、なければ同一デザインの Noto Sans JP を読み込む） -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- 食べログの情報・画像の取得先へ先に接続しておく（初回の待ち時間を短縮） -->
+<link rel="preconnect" href="https://api.microlink.io" crossorigin>
+<link rel="preconnect" href="https://tblg.k-img.com">
+<link rel="dns-prefetch" href="https://api.allorigins.win">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400..800&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
 <style>
@@ -1490,7 +1494,7 @@ function cardHTML(s, opts = {}) {
   ].join('');
   const by = memberName(s.addedBy);
   return `<article class="card${s.visited ? ' visited' : ''}">
-    ${s.image ? `<a class="card-img" href="${esc(s.tabelog || s.image)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(s.name)}を食べログで開く"><img class="shop-img" src="${esc(s.image)}" alt="" loading="lazy" referrerpolicy="no-referrer"></a>` : ''}
+    ${s.image ? `<a class="card-img" href="${esc(s.tabelog || s.image)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(s.name)}を食べログで開く"><img class="shop-img" src="${esc(s.image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>` : ''}
     <div class="card-head">
       <div>
         <h3><button type="button" class="name-btn" data-edit="${esc(s.id)}" aria-label="${esc(s.name)}を編集">${esc(s.name)}<svg class="i pen" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button></h3>
@@ -2042,45 +2046,89 @@ function mapTabelogGenres(cats) {
     return a && db.genres.includes(a) ? a : c;        // 近いジャンルがあればそれ、無ければカテゴリ名のまま
   }));
 }
-const infoCache = new Map();
-// 戻り値: { ok: ページを読めたか, image, rating }
-async function fetchTabelogInfo(pageUrl) {
-  if (infoCache.has(pageUrl)) return infoCache.get(pageUrl);
-  const tryJson = async url => {
-    const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  };
-  let ok = false, image = '', rating = null, title = '', cuisine = '';
+/* ---- 取得の高速化 ----
+   1) Microlink はページを描画せずにHTMLだけ読む（prerender=false）。必要な項目だけ返させる
+   2) Microlink が2.5秒で返らない・情報が足りないときだけ予備も並行して走らせ、先にそろった方を使う
+   3) 画像・カテゴリがそろった時点ですぐ表示し、評価は後から届けば追加で反映する
+   4) 結果は端末にも7日間保存し、同じURLは通信しない。取得中の同じURLは1回にまとめる */
+const INFO_LS_KEY = 'futari-tabelog-cache';
+const HEDGE_MS = 2500;
+const infoCache = new Map();  // URL → 取得結果
+const inflight = new Map();   // URL → 取得中の { first, full }
+const wait = ms => new Promise(r => setTimeout(r, ms));
+function lsInfo(url, value) {
   try {
-    // 1) Microlink：リンクプレビュー用の画像と、点数の表示部分を取得
-    const q = new URLSearchParams({ url: pageUrl, 'data.rating.selector': RATING_SELECTOR, 'data.rating.attr': 'text' });
-    const j = await tryJson(`https://api.microlink.io/?${q}`);
-    if (j?.status === 'success') {
-      ok = true;
-      image = j.data?.image?.url || '';
-      rating = parseRating(j.data?.rating);
-      title = j.data?.title || '';
-    }
-  } catch (e) { console.warn('microlink failed', e); }
-  if (!ok || !rating || !parseTabelogTitle(title).genres.length) {
-    try {
-      // 2) 予備：ページのHTMLを取得して読む
-      const j = await tryJson(`https://api.allorigins.win/get?url=${encodeURIComponent(pageUrl)}`);
-      if (j?.contents) {
-        const info = infoFromHtml(j.contents);
-        ok = true;
-        image = image || info.image;
-        rating = rating || info.rating;
-        if (!parseTabelogTitle(title).genres.length) title = info.title || title;
-        cuisine = info.cuisine;
-      }
-    } catch (e) { console.warn('allorigins failed', e); }
+    const all = JSON.parse(lsGet(INFO_LS_KEY) || '{}');
+    if (value === undefined) { const e = all[url]; return e && Date.now() - e.at < RATING_TTL ? e.v : null; }
+    all[url] = { at: Date.now(), v: value };
+    const keys = Object.keys(all);
+    if (keys.length > 300) keys.sort((a, b) => all[a].at - all[b].at).slice(0, keys.length - 300).forEach(k => delete all[k]);
+    lsSet(INFO_LS_KEY, JSON.stringify(all));
+  } catch { return null; }
+}
+async function getWithTimeout(url, ms, as = 'json') {
+  const r = await fetch(url, { signal: AbortSignal.timeout(ms) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return as === 'json' ? r.json() : r.text();
+}
+async function viaMicrolink(pageUrl) {
+  const q = new URLSearchParams({
+    url: pageUrl, prerender: 'false', filter: 'title,image,rating',
+    'data.rating.selector': RATING_SELECTOR, 'data.rating.attr': 'text',
+  });
+  const j = await getWithTimeout(`https://api.microlink.io/?${q}`, 10000);
+  if (j?.status !== 'success') throw new Error(`microlink: ${j?.status}`);
+  return { image: j.data?.image?.url || '', rating: parseRating(j.data?.rating), title: j.data?.title || '', cuisine: '' };
+}
+async function viaAllOrigins(pageUrl) {
+  const html = await getWithTimeout(`https://api.allorigins.win/raw?url=${encodeURIComponent(pageUrl)}`, 10000, 'text');
+  if (!html) throw new Error('allorigins: empty');
+  return infoFromHtml(html);
+}
+// 取得元ごとの結果をまとめて { ok, image, rating, name, genres } にする
+function toInfo(parts) {
+  const got = parts.filter(Boolean);
+  const pick = f => got.map(p => p[f]).find(v => v != null && v !== '');
+  const t = parseTabelogTitle(got.map(p => p.title).find(x => parseTabelogTitle(x).genres.length) || pick('title') || '');
+  return { ok: got.length > 0, image: safeUrl(pick('image') || ''), rating: pick('rating') ?? null, name: t.name, genres: t.genres.length ? t.genres : splitCategories(pick('cuisine')) };
+}
+const isComplete = i => i.ok && !!i.image && i.rating != null && i.genres.length > 0;
+const isUsable = i => i.ok && (!!i.image || i.genres.length > 0);
+
+// 戻り値: { first: すぐ表示できる結果, full: 取れるだけ取った結果 }（fresh=true はキャッシュを使わない）
+function fetchTabelogInfo(pageUrl, { fresh = false } = {}) {
+  if (!fresh) {
+    const c = infoCache.get(pageUrl) || lsInfo(pageUrl);
+    if (c) { const p = Promise.resolve(c); return { first: p, full: p }; }
   }
-  const t = parseTabelogTitle(title);
-  const res = { ok, image: safeUrl(image), rating, name: t.name, genres: t.genres.length ? t.genres : splitCategories(cuisine) };
-  if (ok) infoCache.set(pageUrl, res);
-  return res;
+  if (inflight.has(pageUrl)) return inflight.get(pageUrl);
+  let resolveFirst;
+  const first = new Promise(r => { resolveFirst = r; });
+  const full = (async () => {
+    let mlDone = false, mlRes = null, aoP = null;
+    const mlP = viaMicrolink(pageUrl)
+      .catch(e => { console.warn('microlink failed', e); return null; })
+      .then(r => { mlDone = true; mlRes = r; const i = toInfo([r]); if (isUsable(i)) resolveFirst(i); return r; });
+    await Promise.race([mlP, wait(HEDGE_MS)]);
+    if (!mlDone || !isComplete(toInfo([mlRes]))) {
+      aoP = viaAllOrigins(pageUrl)
+        .catch(e => { console.warn('allorigins failed', e); return null; })
+        .then(r => { const i = toInfo([r]); if (isUsable(i)) resolveFirst(i); return r; });
+    }
+    const runs = [mlP, aoP].filter(Boolean);
+    // どれかが完全な結果を返したら、その時点で確定（残りは待たない）
+    const complete = await new Promise(res => {
+      let left = runs.length;
+      runs.forEach(p => p.then(r => { if (isComplete(toInfo([r]))) res(r); if (--left === 0) res(null); }));
+    });
+    const info = complete ? toInfo([complete]) : toInfo(await Promise.all(runs));
+    resolveFirst(info);
+    if (info.ok) { infoCache.set(pageUrl, info); lsInfo(pageUrl, info); }
+    return info;
+  })().finally(() => inflight.delete(pageUrl));
+  const handle = { first, full };
+  inflight.set(pageUrl, handle);
+  return handle;
 }
 const ratingStale = s => s.ratingFrom !== tabelogTop(s.tabelog) || !s.ratingAt || Date.now() - s.ratingAt > RATING_TTL;
 
@@ -2088,14 +2136,15 @@ function renderImagePreview() {
   const el = $('#imgPreview');
   const rating = form.rating != null ? `<span class="rating"><span class="stars" style="--p:${(form.rating / 5 * 100).toFixed(1)}%" aria-hidden="true">★★★★★</span><b>${form.rating.toFixed(2)}</b><span class="src">食べログ</span></span>` : '';
   const autoNote = form.autoGenres.size ? `<span class="ok-note">ジャンルに「${[...form.autoGenres].map(esc).join('」「')}」を自動で選びました（上のジャンル欄で変更できます）</span>` : '';
+  const more = form.imageState === 'more' && form.rating == null ? '<span class="small">評価を取得しています…</span>' : '';
   if (form.imageState === 'loading') {
     el.innerHTML = '<span>食べログからお店の画像・評価・カテゴリを取得しています…</span>';
   } else if (form.image) {
-    el.innerHTML = `<img src="${esc(form.image)}" alt="" referrerpolicy="no-referrer"><div class="grow">${rating}${autoNote}<span>お店の画像を一覧に表示します。</span><button type="button" class="btn sm" data-action="remove-image">画像を表示しない</button></div>`;
+    el.innerHTML = `<img src="${esc(form.image)}" alt="" referrerpolicy="no-referrer" decoding="async"><div class="grow">${rating}${more}${autoNote}<span>お店の画像を一覧に表示します。</span><button type="button" class="btn sm" data-action="remove-image">画像を表示しない</button></div>`;
   } else if (form.imageState === 'failed') {
     el.innerHTML = `<span>食べログの情報を取得できませんでした。</span><button type="button" class="btn sm" data-action="refetch-image">もう一度試す</button>`;
-  } else if (rating || form.ratingFrom || autoNote) {
-    el.innerHTML = `<div class="grow">${rating || '<span>食べログの評価はまだありません。</span>'}${autoNote}</div>`;
+  } else if (rating || form.ratingFrom || autoNote || more) {
+    el.innerHTML = `<div class="grow">${rating || more || '<span>食べログの評価はまだありません。</span>'}${autoNote}</div>`;
   } else {
     el.innerHTML = '';
   }
@@ -2121,53 +2170,71 @@ function applyTabelogGenres(cats) {
   note.hidden = !picks.length;
   note.textContent = picks.length ? `食べログのカテゴリ（${cats.join('、')}）から「${picks.join('」「')}」を選びました。タップで変更できます。` : '';
 }
+let formFetchSeq = 0;
 async function fetchFormImage({ applyGenres = false } = {}) {
   const top = tabelogTop($('#fTabelog').value);
   if (!top) { clearTabelogForm(); return; }
+  const seq = ++formFetchSeq;
   const imageRemoved = form.imageFrom === top && !form.image; // 「画像を表示しない」を選んでいる
+  const current = () => seq === formFetchSeq && $('#shopDialog').open && tabelogTop($('#fTabelog').value) === top;
   form.imageState = 'loading';
+  form.genresApplied = false;
   renderImagePreview();
-  const info = await fetchTabelogInfo(top);
-  if (tabelogTop($('#fTabelog').value) !== top) return; // 取得中にリンクが変わった
-  if (info.ok) {
-    if (!imageRemoved) { form.image = info.image; form.imageFrom = top; }
-    // カテゴリはリンクを貼った・変えたときだけ反映（編集を開いたときの再取得では、手動で直したタグを変えない）
-    if (applyGenres && info.genres.length) applyTabelogGenres(info.genres);
-    if (applyGenres && info.name && !$('#fName').value.trim()) { $('#fName').value = info.name; syncGeoQuery(); }
-    Object.assign(form, { rating: info.rating, ratingFrom: top, ratingAt: Date.now() });
-  }
-  form.imageState = info.ok ? '' : 'failed';
-  renderImagePreview();
+  const { first, full } = fetchTabelogInfo(top);
+  // 取得が終わる前に保存された場合は、保存後に取得結果をお店に反映する（submit 側で使う）
+  form.pending = { top, full, applyGenres, imageRemoved };
+  const apply = (info, final) => {
+    if (!current()) return;
+    if (info.ok) {
+      if (!imageRemoved && (info.image || final)) { form.image = info.image; form.imageFrom = top; }
+      // カテゴリはリンクを貼った・変えたときだけ、1回だけ反映（途中で手動で直した分を上書きしない）
+      if (applyGenres && !form.genresApplied && info.genres.length) { applyTabelogGenres(info.genres); form.genresApplied = true; }
+      if (applyGenres && info.name && !$('#fName').value.trim()) { $('#fName').value = info.name; syncGeoQuery(); }
+      if (info.rating != null || final) Object.assign(form, { rating: info.rating, ratingFrom: top, ratingAt: Date.now() });
+    }
+    form.imageState = final ? (info.ok ? '' : 'failed') : (info.ok ? 'more' : 'loading');
+    if (final) form.pending = null;
+    renderImagePreview();
+  };
+  apply(await first, false);
+  apply(await full, true);
 }
-$('#fTabelog').addEventListener('input', () => {
+$('#fTabelog').addEventListener('input', e => {
   clearTimeout(imgTimer);
   const top = tabelogTop($('#fTabelog').value);
   if (!top) { clearTabelogForm(); return; }
   if (top === form.imageFrom && top === form.ratingFrom) return;
-  imgTimer = setTimeout(() => fetchFormImage({ applyGenres: true }), 500);
+  // 貼り付けはすぐに取得、手入力は打ち終わるのを少し待つ
+  const pasted = e.inputType === 'insertFromPaste' || e.inputType === 'insertReplacementText' || !e.inputType;
+  imgTimer = setTimeout(() => fetchFormImage({ applyGenres: true }), pasted ? 0 : 400);
 });
 // 食べログのリンクがあるのに画像・評価が未取得（または1週間以上前）のお店を、裏で1件ずつ更新する（相手の画面にも反映）
 const imageTried = new Set();
-let backfilling = false;
-async function backfillImages() {
-  if (backfilling || !session.spaceId) return;
-  backfilling = true;
-  try {
-    for (;;) {
-      const s = db.shops.find(x => {
-        const top = tabelogTop(x.tabelog);
-        return top && (x.imageFrom !== top || ratingStale(x)) && !imageTried.has(x.id + top);
-      });
-      if (!s) break;
-      const top = tabelogTop(s.tabelog);
-      imageTried.add(s.id + top);
-      const info = await fetchTabelogInfo(top);
-      if (!info.ok || !session.spaceId) continue; // 取得できなければ次回の起動時に再挑戦
-      const upd = { rating: info.rating, ratingFrom: top, ratingAt: Date.now() };
-      if (s.imageFrom !== top) Object.assign(upd, { image: info.image, imageFrom: top });
-      await fb.updateDoc(fb.doc(shopsCol(), s.id), upd).catch(e => console.warn(e));
-    }
-  } finally { backfilling = false; }
+let bfWorkers = 0;
+const BF_PARALLEL = 3;
+const nextBackfill = () => db.shops.find(x => {
+  const top = tabelogTop(x.tabelog);
+  return top && (x.imageFrom !== top || ratingStale(x)) && !imageTried.has(x.id + top);
+});
+async function backfillWorker() {
+  for (let s = nextBackfill(); s && session.spaceId; s = nextBackfill()) {
+    const top = tabelogTop(s.tabelog);
+    imageTried.add(s.id + top); // 取りかかったお店はすぐ印を付け、ほかの処理と重ならないようにする
+    // 評価の定期更新は、端末に保存した古い結果を使わずに取り直す
+    const info = await fetchTabelogInfo(top, { fresh: s.ratingFrom === top && ratingStale(s) }).full;
+    if (!info.ok || !session.spaceId) continue; // 取得できなければ次回の起動時に再挑戦
+    const upd = { rating: info.rating, ratingFrom: top, ratingAt: Date.now() };
+    if (s.imageFrom !== top) Object.assign(upd, { image: info.image, imageFrom: top });
+    await fb.updateDoc(fb.doc(shopsCol(), s.id), upd).catch(e => console.warn(e));
+  }
+}
+// 未取得のお店が増えるたびに呼ばれ、最大3件まで並行して取得する
+function backfillImages() {
+  if (!session.spaceId) return;
+  while (bfWorkers < BF_PARALLEL && nextBackfill()) {
+    bfWorkers++;
+    backfillWorker().finally(() => { bfWorkers--; });
+  }
 }
 // 画像が読み込めなかった（削除・リンク切れ）ときは枠ごと隠す
 document.addEventListener('error', e => {
@@ -2236,6 +2303,25 @@ $('#shopForm').addEventListener('submit', e => {
     createdAt: prev?.createdAt || Date.now(),
     updatedAt: Date.now(),
   });
+  // 食べログの取得が終わる前に保存した場合は、届いた時点でお店に反映する（画面を閉じても続く）
+  const pending = form.pending && form.pending.top === tabelogTop(shop.tabelog) ? { ...form.pending, genresApplied: form.genresApplied } : null;
+  if (pending) {
+    form.pending = null;
+    pending.full.then(info => {
+      const cur = db.shops.find(x => x.id === shop.id);
+      if (!info.ok || !cur || !session.spaceId || tabelogTop(cur.tabelog) !== pending.top) return;
+      const upd = {};
+      if (cur.imageFrom !== pending.top && !pending.imageRemoved) Object.assign(upd, { image: info.image, imageFrom: pending.top });
+      if (cur.ratingFrom !== pending.top || cur.rating == null) Object.assign(upd, { rating: info.rating, ratingFrom: pending.top, ratingAt: Date.now() });
+      if (pending.applyGenres && !pending.genresApplied && info.genres.length) {
+        const picks = mapTabelogGenres(info.genres);
+        upd.genres = fb.arrayUnion(...picks);
+        const add = picks.filter(g => !db.genres.includes(g));
+        if (add.length) { db.genres = [...db.genres, ...add]; writeMasters(); }
+      }
+      if (Object.keys(upd).length) fb.updateDoc(fb.doc(shopsCol(), shop.id), upd).catch(e => console.warn(e));
+    });
+  }
   // 食べログのカテゴリなど、まだ選択肢に無いジャンルは選択肢にも追加する
   const newGenres = shop.genres.filter(g => !db.genres.includes(g));
   if (newGenres.length) { db.genres = [...db.genres, ...newGenres]; writeMasters(); }
@@ -2537,7 +2623,7 @@ document.addEventListener('click', async e => {
     }
     case 'geocode': runGeocode(); break;
     case 'remove-image': form.image = ''; form.imageFrom = tabelogTop($('#fTabelog').value) || ''; form.imageState = ''; renderImagePreview(); break;
-    case 'refetch-image': infoCache.delete(tabelogTop($('#fTabelog').value)); fetchFormImage(); break;
+    case 'refetch-image': { const t = tabelogTop($('#fTabelog').value); infoCache.delete(t); lsInfo(t, null); fetchFormImage({ applyGenres: !form.genresApplied }); break; }
     case 'pick-geo': {
       $('#fCoords').value = fmtPos({ lat: +a.dataset.lat, lng: +a.dataset.lng });
       form.posAuto = false;
