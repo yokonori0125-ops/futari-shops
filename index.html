@@ -921,6 +921,9 @@ function normShop(s) {
     rating: parseRating(s.rating),           // 食べログの点数（1.00〜5.00、評価なしは null）
     ratingFrom: String(s.ratingFrom || ''),
     ratingAt: Number(s.ratingAt) || 0,
+    imageHidden: !!s.imageHidden,                  // 「画像を表示しない」を選んだか
+    genresFrom: String(s.genresFrom || ''),        // 食べログのカテゴリを自動でタグ付けしたリンク（1回だけ行う判定用）
+    infoV: Number(s.infoV) || 0,                   // 食べログ情報の取得方式の版（不具合で空になったデータの修復判定用）
     createdAt: Number(s.createdAt) || now,
     updatedAt: Number(s.updatedAt) || now,
   };
@@ -1908,6 +1911,9 @@ function openShopForm(id = null) {
   form.rating = s?.rating ?? null;
   form.ratingFrom = s?.ratingFrom || '';
   form.ratingAt = s?.ratingAt || 0;
+  form.imageHidden = !!s?.imageHidden;
+  form.genresApplied = false;
+  form.pending = null;
   form.autoGenres = new Set();
   form.autoCats = [];
   $('#genreAutoNote').hidden = true;
@@ -2051,7 +2057,9 @@ function mapTabelogGenres(cats) {
    2) Microlink が2.5秒で返らない・情報が足りないときだけ予備も並行して走らせ、先にそろった方を使う
    3) 画像・カテゴリがそろった時点ですぐ表示し、評価は後から届けば追加で反映する
    4) 結果は端末にも7日間保存し、同じURLは通信しない。取得中の同じURLは1回にまとめる */
-const INFO_LS_KEY = 'futari-tabelog-cache';
+const INFO_LS_KEY = 'futari-tabelog-cache-v2';
+lsDel('futari-tabelog-cache'); // 旧版で保存された（空の結果を含む）キャッシュは捨てる
+const ML_MODE_KEY = 'futari-microlink-mode';
 const HEDGE_MS = 2500;
 const infoCache = new Map();  // URL → 取得結果
 const inflight = new Map();   // URL → 取得中の { first, full }
@@ -2060,7 +2068,7 @@ function lsInfo(url, value) {
   try {
     const all = JSON.parse(lsGet(INFO_LS_KEY) || '{}');
     if (value === undefined) { const e = all[url]; return e && Date.now() - e.at < RATING_TTL ? e.v : null; }
-    all[url] = { at: Date.now(), v: value };
+    if (value === null) delete all[url]; else all[url] = { at: Date.now(), v: value };
     const keys = Object.keys(all);
     if (keys.length > 300) keys.sort((a, b) => all[a].at - all[b].at).slice(0, keys.length - 300).forEach(k => delete all[k]);
     lsSet(INFO_LS_KEY, JSON.stringify(all));
@@ -2071,12 +2079,11 @@ async function getWithTimeout(url, ms, as = 'json') {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return as === 'json' ? r.json() : r.text();
 }
-async function viaMicrolink(pageUrl) {
-  const q = new URLSearchParams({
-    url: pageUrl, prerender: 'false', filter: 'title,image,rating',
-    'data.rating.selector': RATING_SELECTOR, 'data.rating.attr': 'text',
-  });
-  const j = await getWithTimeout(`https://api.microlink.io/?${q}`, 10000);
+// render=false：ページを描画せずにHTMLだけ読む（速い）／true：ブラウザで描画して読む（遅いが確実）
+async function viaMicrolink(pageUrl, render = false) {
+  const q = new URLSearchParams({ url: pageUrl, 'data.rating.selector': RATING_SELECTOR, 'data.rating.attr': 'text' });
+  if (!render) q.set('prerender', 'false');
+  const j = await getWithTimeout(`https://api.microlink.io/?${q}`, render ? 20000 : 10000);
   if (j?.status !== 'success') throw new Error(`microlink: ${j?.status}`);
   return { image: j.data?.image?.url || '', rating: parseRating(j.data?.rating), title: j.data?.title || '', cuisine: '' };
 }
@@ -2085,15 +2092,19 @@ async function viaAllOrigins(pageUrl) {
   if (!html) throw new Error('allorigins: empty');
   return infoFromHtml(html);
 }
-// 取得元ごとの結果をまとめて { ok, image, rating, name, genres } にする
+// 食べログのお店ページとして読めた結果か（アクセス拒否・エラー画面などの「空の成功」を除外する）
+const isTabelogPage = p => !!p && (parseTabelogTitle(p.title).genres.length > 0 || p.rating != null || splitCategories(p.cuisine).length > 0);
+// 取得元ごとの結果をまとめて { ok, image, rating, name, genres } にする（お店ページとして読めた結果だけを使う）
 function toInfo(parts) {
-  const got = parts.filter(Boolean);
+  const got = parts.filter(isTabelogPage);
   const pick = f => got.map(p => p[f]).find(v => v != null && v !== '');
   const t = parseTabelogTitle(got.map(p => p.title).find(x => parseTabelogTitle(x).genres.length) || pick('title') || '');
   return { ok: got.length > 0, image: safeUrl(pick('image') || ''), rating: pick('rating') ?? null, name: t.name, genres: t.genres.length ? t.genres : splitCategories(pick('cuisine')) };
 }
 const isComplete = i => i.ok && !!i.image && i.rating != null && i.genres.length > 0;
 const isUsable = i => i.ok && (!!i.image || i.genres.length > 0);
+// 描画なしの取得で読めないことが分かったら、しばらくは最初から描画ありで取得する
+const renderFirst = () => { try { const m = JSON.parse(lsGet(ML_MODE_KEY)); return m?.render && Date.now() - m.at < RATING_TTL; } catch { return false; } };
 
 // 戻り値: { first: すぐ表示できる結果, full: 取れるだけ取った結果 }（fresh=true はキャッシュを使わない）
 function fetchTabelogInfo(pageUrl, { fresh = false } = {}) {
@@ -2105,8 +2116,9 @@ function fetchTabelogInfo(pageUrl, { fresh = false } = {}) {
   let resolveFirst;
   const first = new Promise(r => { resolveFirst = r; });
   const full = (async () => {
+    const render = renderFirst();
     let mlDone = false, mlRes = null, aoP = null;
-    const mlP = viaMicrolink(pageUrl)
+    const mlP = viaMicrolink(pageUrl, render)
       .catch(e => { console.warn('microlink failed', e); return null; })
       .then(r => { mlDone = true; mlRes = r; const i = toInfo([r]); if (isUsable(i)) resolveFirst(i); return r; });
     await Promise.race([mlP, wait(HEDGE_MS)]);
@@ -2121,8 +2133,15 @@ function fetchTabelogInfo(pageUrl, { fresh = false } = {}) {
       let left = runs.length;
       runs.forEach(p => p.then(r => { if (isComplete(toInfo([r]))) res(r); if (--left === 0) res(null); }));
     });
-    const info = complete ? toInfo([complete]) : toInfo(await Promise.all(runs));
+    let info = complete ? toInfo([complete]) : toInfo(await Promise.all(runs));
+    // どちらからもお店ページとして読めなかったときは、最後にブラウザ描画ありで取り直す
+    if (!info.ok && !render) {
+      const r = await viaMicrolink(pageUrl, true).catch(e => { console.warn('microlink(render) failed', e); return null; });
+      info = toInfo([r]);
+      if (info.ok) lsSet(ML_MODE_KEY, JSON.stringify({ render: true, at: Date.now() }));
+    }
     resolveFirst(info);
+    // 読めた結果だけを保存する（読めなかったときは保存せず、次回また取得する）
     if (info.ok) { infoCache.set(pageUrl, info); lsInfo(pageUrl, info); }
     return info;
   })().finally(() => inflight.delete(pageUrl));
@@ -2190,7 +2209,8 @@ async function fetchFormImage({ applyGenres = false } = {}) {
       // カテゴリはリンクを貼った・変えたときだけ、1回だけ反映（途中で手動で直した分を上書きしない）
       if (applyGenres && !form.genresApplied && info.genres.length) { applyTabelogGenres(info.genres); form.genresApplied = true; }
       if (applyGenres && info.name && !$('#fName').value.trim()) { $('#fName').value = info.name; syncGeoQuery(); }
-      if (info.rating != null || final) Object.assign(form, { rating: info.rating, ratingFrom: top, ratingAt: Date.now() });
+      // 新しく評価が取れなかったときは、同じお店で前に取れていた評価を残す
+      if (info.rating != null || final) Object.assign(form, { rating: info.rating ?? (form.ratingFrom === top ? form.rating : null), ratingFrom: top, ratingAt: Date.now() });
     }
     form.imageState = final ? (info.ok ? '' : 'failed') : (info.ok ? 'more' : 'loading');
     if (final) form.pending = null;
@@ -2212,19 +2232,47 @@ $('#fTabelog').addEventListener('input', e => {
 const imageTried = new Set();
 let bfWorkers = 0;
 const BF_PARALLEL = 3;
-const nextBackfill = () => db.shops.find(x => {
+// 食べログの情報で、更新が必要なもの
+const INFO_V = 2;
+function backfillNeeds(x) {
   const top = tabelogTop(x.tabelog);
-  return top && (x.imageFrom !== top || ratingStale(x)) && !imageTried.has(x.id + top);
-});
+  if (!top) return null;
+  const need = {
+    image: x.imageFrom !== top,
+    rating: ratingStale(x),
+    genres: x.genresFrom !== top,                 // 既存のお店にも1回だけカテゴリのタグを付ける
+    // 旧版の不具合で「画像も評価も空」で保存されたお店は、もう一度取り直す
+    repair: x.infoV < INFO_V && x.imageFrom === top && !x.image && x.rating == null && !x.imageHidden,
+  };
+  return Object.values(need).some(Boolean) ? { top, ...need } : null;
+}
+const nextBackfill = () => db.shops.find(x => { const n = backfillNeeds(x); return n && !imageTried.has(x.id + n.top); });
 async function backfillWorker() {
   for (let s = nextBackfill(); s && session.spaceId; s = nextBackfill()) {
-    const top = tabelogTop(s.tabelog);
+    const need = backfillNeeds(s);
+    const top = need.top;
     imageTried.add(s.id + top); // 取りかかったお店はすぐ印を付け、ほかの処理と重ならないようにする
-    // 評価の定期更新は、端末に保存した古い結果を使わずに取り直す
-    const info = await fetchTabelogInfo(top, { fresh: s.ratingFrom === top && ratingStale(s) }).full;
-    if (!info.ok || !session.spaceId) continue; // 取得できなければ次回の起動時に再挑戦
-    const upd = { rating: info.rating, ratingFrom: top, ratingAt: Date.now() };
-    if (s.imageFrom !== top) Object.assign(upd, { image: info.image, imageFrom: top });
+    // 評価の定期更新・修復は、端末に保存した古い結果を使わずに取り直す
+    const fresh = (s.ratingFrom === top && ratingStale(s)) || need.repair;
+    const info = await fetchTabelogInfo(top, { fresh }).full;
+    if (!info.ok || !session.spaceId) continue; // お店ページとして読めなければ何も書き込まず、次回の起動時に再挑戦
+    const cur = db.shops.find(x => x.id === s.id);
+    if (!cur || tabelogTop(cur.tabelog) !== top) continue;
+    const upd = { infoV: INFO_V };
+    if (need.rating || need.repair) {
+      // 評価が取れなかったときは、前に取れていた評価を消さずに残す
+      Object.assign(upd, { rating: info.rating ?? (cur.ratingFrom === top ? cur.rating : null), ratingFrom: top, ratingAt: Date.now() });
+    }
+    if ((need.image || need.repair) && !cur.imageHidden) Object.assign(upd, { image: info.image, imageFrom: top });
+    if (need.genres) {
+      upd.genresFrom = top;
+      const picks = mapTabelogGenres(info.genres).filter(g => !cur.genres.includes(g));
+      if (picks.length) {
+        upd.genres = fb.arrayUnion(...picks); // 追加だけ（手動で付けたタグは消さない）
+        const add = picks.filter(g => !db.genres.includes(g));
+        if (add.length) { db.genres = [...db.genres, ...add]; writeMasters(); }
+      }
+    }
     await fb.updateDoc(fb.doc(shopsCol(), s.id), upd).catch(e => console.warn(e));
   }
 }
@@ -2300,6 +2348,9 @@ $('#shopForm').addEventListener('submit', e => {
     rating: $('#fTabelog').value.trim() ? form.rating : null,
     ratingFrom: $('#fTabelog').value.trim() ? form.ratingFrom : '',
     ratingAt: $('#fTabelog').value.trim() ? form.ratingAt : 0,
+    imageHidden: form.imageHidden && !form.image,
+    genresFrom: form.genresApplied ? tabelogTop($('#fTabelog').value) || '' : (prev && tabelogTop(prev.tabelog) === tabelogTop($('#fTabelog').value) ? prev.genresFrom : ''),
+    infoV: form.ratingFrom && form.ratingFrom === tabelogTop($('#fTabelog').value) ? INFO_V : (prev?.infoV || 0),
     createdAt: prev?.createdAt || Date.now(),
     updatedAt: Date.now(),
   });
@@ -2312,8 +2363,9 @@ $('#shopForm').addEventListener('submit', e => {
       if (!info.ok || !cur || !session.spaceId || tabelogTop(cur.tabelog) !== pending.top) return;
       const upd = {};
       if (cur.imageFrom !== pending.top && !pending.imageRemoved) Object.assign(upd, { image: info.image, imageFrom: pending.top });
-      if (cur.ratingFrom !== pending.top || cur.rating == null) Object.assign(upd, { rating: info.rating, ratingFrom: pending.top, ratingAt: Date.now() });
-      if (pending.applyGenres && !pending.genresApplied && info.genres.length) {
+      if (cur.ratingFrom !== pending.top || cur.rating == null) Object.assign(upd, { rating: info.rating ?? (cur.ratingFrom === pending.top ? cur.rating : null), ratingFrom: pending.top, ratingAt: Date.now(), infoV: INFO_V });
+      if (pending.applyGenres && !pending.genresApplied && info.genres.length && cur.genresFrom !== pending.top) {
+        upd.genresFrom = pending.top;
         const picks = mapTabelogGenres(info.genres);
         upd.genres = fb.arrayUnion(...picks);
         const add = picks.filter(g => !db.genres.includes(g));
@@ -2622,7 +2674,7 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'geocode': runGeocode(); break;
-    case 'remove-image': form.image = ''; form.imageFrom = tabelogTop($('#fTabelog').value) || ''; form.imageState = ''; renderImagePreview(); break;
+    case 'remove-image': form.image = ''; form.imageFrom = tabelogTop($('#fTabelog').value) || ''; form.imageHidden = true; form.imageState = ''; renderImagePreview(); break;
     case 'refetch-image': { const t = tabelogTop($('#fTabelog').value); infoCache.delete(t); lsInfo(t, null); fetchFormImage({ applyGenres: !form.genresApplied }); break; }
     case 'pick-geo': {
       $('#fCoords').value = fmtPos({ lat: +a.dataset.lat, lng: +a.dataset.lng });
