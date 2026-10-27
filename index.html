@@ -274,6 +274,23 @@
   .card.visited { background: var(--surface-2); }
   .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
   .card h3 { margin: 0; font-size: 17px; line-height: 1.4; overflow-wrap: anywhere; }
+  /* 店名をタップすると編集画面が開く */
+  .name-btn {
+    display: inline-flex; align-items: flex-start; gap: 6px; min-height: var(--tap); margin: -8px 0 -6px -6px; padding: 8px 6px 6px;
+    border: 0; background: none; border-radius: 8px; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  }
+  .name-btn:hover { background: var(--surface-2); }
+  .name-btn:hover .pen, .name-btn:focus-visible .pen { opacity: 1; }
+  .name-btn .pen { width: 16px; height: 16px; margin-top: 4px; color: var(--muted); opacity: .7; }
+  /* 食べログのお店トップ画像 */
+  .card-img { display: block; margin: -16px -16px 0; aspect-ratio: 16 / 7; overflow: hidden; border-radius: var(--radius) var(--radius) 0 0; background: var(--surface-2); }
+  .card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card.selectable .card-img { margin: 0; border-radius: 10px; }
+  .card.selected .card-img { opacity: .85; }
+  .img-preview { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 13.5px; color: var(--muted); }
+  .img-preview:empty { display: none; }
+  .img-preview img { width: 120px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; background: var(--surface-2); flex-shrink: 0; }
+  .img-preview .grow { flex: 1; display: grid; gap: 6px; justify-items: start; }
   .card .area { font-size: 13.5px; color: var(--muted); margin-top: 2px; }
   .visit {
     flex-shrink: 0; min-height: 36px; border: 1.5px solid var(--border); background: var(--surface); border-radius: 99px;
@@ -707,6 +724,7 @@
           <input type="text" id="fInsta" placeholder="URL または @アカウント" autocomplete="off">
         </div>
       </div>
+      <div class="img-preview" id="imgPreview" aria-live="polite"></div>
       <div class="field">
         <label for="fCoords">マップ上の位置（緯度, 経度）</label>
         <input type="text" id="fCoords" placeholder="例: 35.6467, 139.7101" inputmode="decimal" autocomplete="off">
@@ -876,6 +894,8 @@ function normShop(s) {
     lat: ok ? lat : null,
     lng: ok ? lng : null,
     addedBy: String(s.addedBy || ''),
+    image: safeUrl(s.image || ''),          // 食べログのお店トップ画像（og:image）
+    imageFrom: String(s.imageFrom || ''),  // 画像を取得した食べログのURL（再取得の判定用）
     createdAt: Number(s.createdAt) || now,
     updatedAt: Number(s.updatedAt) || now,
   };
@@ -1140,6 +1160,7 @@ function enterSpace(id) {
     db.shops = snap.docs.map(d => normShop({ ...d.data(), id: d.id })).filter(Boolean);
     session.loaded = true;
     render();
+    backfillImages();
   }, onErr));
   showApp();
 }
@@ -1430,6 +1451,7 @@ function selectCardHTML(s) {
   const tags = [...s.genres, ...s.moods].map((t, i) => `<span class="tag ${i < s.genres.length ? 'genre' : 'mood'}">${esc(t)}</span>`).join('');
   return `<article class="card selectable${on ? ' selected' : ''}" data-select-id="${esc(s.id)}" role="checkbox" aria-checked="${on}" tabindex="0">
     <span class="check-ind" aria-hidden="true"></span>
+    ${s.image ? `<div class="card-img"><img class="shop-img" src="${esc(s.image)}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>` : ''}
     <div><h3>${esc(s.name)}</h3><div class="area">${esc(s.area || NO_AREA)}${s.visited ? '・行った' : ''}</div></div>
     ${tags ? `<div class="tags">${tags}</div>` : ''}
   </article>`;
@@ -1441,9 +1463,10 @@ function cardHTML(s) {
   ].join('');
   const by = memberName(s.addedBy);
   return `<article class="card${s.visited ? ' visited' : ''}">
+    ${s.image ? `<a class="card-img" href="${esc(s.tabelog || s.image)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(s.name)}を食べログで開く"><img class="shop-img" src="${esc(s.image)}" alt="" loading="lazy" referrerpolicy="no-referrer"></a>` : ''}
     <div class="card-head">
       <div>
-        <h3>${esc(s.name)}</h3>
+        <h3><button type="button" class="name-btn" data-edit="${esc(s.id)}" aria-label="${esc(s.name)}を編集">${esc(s.name)}<svg class="i pen" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button></h3>
         <div class="area">${esc(s.area || NO_AREA)}${by ? `<span class="by">・${esc(by)}が追加</span>` : ''}</div>
       </div>
       <button class="visit${s.visited ? ' on' : ''}" data-action="toggle-visited" data-id="${esc(s.id)}" aria-pressed="${s.visited}" aria-label="${s.visited ? '行った（押すと行きたいに戻す）' : '行きたい（押すと行ったにする）'}">${s.visited ? '✓ 行った' : '行きたい'}</button>
@@ -1453,7 +1476,6 @@ function cardHTML(s) {
     <div class="links">${linksHTML(s)}</div>
     <div class="card-foot">
       ${hasPos(s) ? `<button class="btn sm" data-action="show-on-map" data-id="${esc(s.id)}">地図で見る</button>` : `<span class="nopos">位置未設定</span>`}
-      <button class="btn sm" data-edit="${esc(s.id)}">編集</button>
     </div>
   </article>`;
 }
@@ -1789,6 +1811,7 @@ async function renderMap(focusId) {
    ========================================================= */
 let editingId = null;
 const form = {
+  image: '', imageFrom: '', imageState: '',
   genres: new Set(),
   moods: new Set(),
   posAuto: false,   // 位置がURLから自動入力されたかどうか
@@ -1820,6 +1843,12 @@ function openShopForm(id = null) {
   $('#fGmap').value = s?.gmap || '';
   $('#fTabelog').value = s?.tabelog || '';
   $('#fInsta').value = s?.insta || '';
+  form.image = s?.image || '';
+  form.imageFrom = s?.imageFrom || '';
+  form.imageState = '';
+  renderImagePreview();
+  // 食べログのリンクはあるのに画像がまだ無いお店は、編集を開いたときに取得する
+  if (s?.tabelog && tabelogTop(s.tabelog) && tabelogTop(s.tabelog) !== s.imageFrom) fetchFormImage();
   $('#fCoords').value = s && hasPos(s) ? fmtPos(s) : '';
   $('#fMemo').value = s?.memo || '';
   $('#fVisited').checked = !!s?.visited;
@@ -1867,6 +1896,105 @@ $('#fGmap').addEventListener('input', () => {
     setCoordHint(DEFAULT_COORD_HINT);
   }
 });
+
+/* =========================================================
+   食べログのお店トップ画像
+   ブラウザから食べログのページは直接読めない（CORS）ため、
+   リンクプレビュー用の画像（og:image）を外部サービス経由で取得する
+   ========================================================= */
+// 口コミ・写真などのサブページのURLでも、お店トップのURLにそろえる
+function tabelogTop(u) {
+  try {
+    const x = new URL(normUrl(u));
+    if (!/(^|\.)tabelog\.com$/.test(x.hostname)) return null;
+    const m = x.pathname.match(/^\/(?:en\/|cn\/|kr\/|tw\/)?([a-z]+\/A\d{4}\/A\d{6}\/\d+)(?:\/|$)/);
+    return m ? `https://tabelog.com/${m[1]}/` : null;
+  } catch { return null; }
+}
+const ogCache = new Map();
+async function fetchOgImage(pageUrl) {
+  if (ogCache.has(pageUrl)) return ogCache.get(pageUrl);
+  const tryJson = async url => {
+    const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  };
+  let img = '';
+  try {
+    // 1) Microlink（リンクプレビュー用のメタ情報を返すサービス）
+    const j = await tryJson(`https://api.microlink.io/?url=${encodeURIComponent(pageUrl)}`);
+    img = j?.data?.image?.url || '';
+  } catch (e) { console.warn('microlink failed', e); }
+  if (!img) {
+    try {
+      // 2) 予備：ページのHTMLを取得して og:image を読む
+      const j = await tryJson(`https://api.allorigins.win/get?url=${encodeURIComponent(pageUrl)}`);
+      const doc = new DOMParser().parseFromString(j?.contents || '', 'text/html');
+      img = doc.querySelector('meta[property="og:image"]')?.content || '';
+    } catch (e) { console.warn('allorigins failed', e); }
+  }
+  img = safeUrl(img);
+  ogCache.set(pageUrl, img);
+  return img;
+}
+function renderImagePreview() {
+  const el = $('#imgPreview');
+  if (form.imageState === 'loading') {
+    el.innerHTML = '<span>食べログからお店の画像を取得しています…</span>';
+  } else if (form.image) {
+    el.innerHTML = `<img src="${esc(form.image)}" alt="" referrerpolicy="no-referrer"><div class="grow"><span>食べログのお店の画像を一覧に表示します。</span><button type="button" class="btn sm" data-action="remove-image">画像を表示しない</button></div>`;
+  } else if (form.imageState === 'failed') {
+    el.innerHTML = `<span>画像を取得できませんでした。</span><button type="button" class="btn sm" data-action="refetch-image">もう一度試す</button>`;
+  } else {
+    el.innerHTML = '';
+  }
+}
+let imgTimer;
+async function fetchFormImage() {
+  const top = tabelogTop($('#fTabelog').value);
+  if (!top) { form.image = ''; form.imageFrom = ''; form.imageState = ''; renderImagePreview(); return; }
+  form.imageState = 'loading';
+  renderImagePreview();
+  const img = await fetchOgImage(top);
+  if (tabelogTop($('#fTabelog').value) !== top) return; // 取得中にリンクが変わった
+  form.image = img;
+  form.imageFrom = top;
+  form.imageState = img ? '' : 'failed';
+  renderImagePreview();
+}
+$('#fTabelog').addEventListener('input', () => {
+  clearTimeout(imgTimer);
+  const top = tabelogTop($('#fTabelog').value);
+  if (!top) { form.image = ''; form.imageFrom = ''; form.imageState = ''; renderImagePreview(); return; }
+  if (top === form.imageFrom && form.image) return;
+  imgTimer = setTimeout(fetchFormImage, 500);
+});
+// 食べログのリンクがあるのに画像が未取得のお店を、裏で1件ずつ取得して保存する（相手の画面にも反映）
+const imageTried = new Set();
+let backfilling = false;
+async function backfillImages() {
+  if (backfilling || !session.spaceId) return;
+  backfilling = true;
+  try {
+    for (;;) {
+      const s = db.shops.find(x => {
+        const top = tabelogTop(x.tabelog);
+        return top && x.imageFrom !== top && !imageTried.has(x.id + top);
+      });
+      if (!s) break;
+      const top = tabelogTop(s.tabelog);
+      imageTried.add(s.id + top);
+      const img = await fetchOgImage(top);
+      if (img && session.spaceId) {
+        await fb.updateDoc(fb.doc(shopsCol(), s.id), { image: img, imageFrom: top }).catch(e => console.warn(e));
+      }
+    }
+  } finally { backfilling = false; }
+}
+// 画像が読み込めなかった（削除・リンク切れ）ときは枠ごと隠す
+document.addEventListener('error', e => {
+  if (e.target instanceof HTMLImageElement && e.target.classList.contains('shop-img')) e.target.closest('.card-img')?.remove();
+}, true);
 
 async function geocode(q) {
   const key = getGmKey();
@@ -1922,6 +2050,8 @@ $('#shopForm').addEventListener('submit', e => {
     lat: pos?.lat ?? null,
     lng: pos?.lng ?? null,
     addedBy: prev?.addedBy || session.user.uid,
+    image: $('#fTabelog').value.trim() ? form.image : '',
+    imageFrom: $('#fTabelog').value.trim() ? form.imageFrom : '',
     createdAt: prev?.createdAt || Date.now(),
     updatedAt: Date.now(),
   });
@@ -2220,6 +2350,8 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'geocode': runGeocode(); break;
+    case 'remove-image': form.image = ''; form.imageFrom = tabelogTop($('#fTabelog').value) || ''; form.imageState = ''; renderImagePreview(); break;
+    case 'refetch-image': ogCache.delete(tabelogTop($('#fTabelog').value)); fetchFormImage(); break;
     case 'pick-geo': {
       $('#fCoords').value = fmtPos({ lat: +a.dataset.lat, lng: +a.dataset.lng });
       form.posAuto = false;
