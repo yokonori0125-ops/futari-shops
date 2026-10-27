@@ -892,6 +892,7 @@ async function login() {
       'auth/popup-blocked': 'ポップアップがブロックされました。ブラウザの設定でこのサイトのポップアップを許可してください。',
       'auth/unauthorized-domain': 'このドメインが Firebase の「承認済みドメイン」に登録されていません。',
       'auth/operation-not-allowed': 'Firebase で Google ログインが有効になっていません。',
+      'auth/configuration-not-found': 'Firebase の Authentication が未設定です。コンソールの Authentication で「始める」を押し、Sign-in method で Google を有効にしてください。',
       'auth/network-request-failed': '通信に失敗しました。接続を確認してください。',
     }[e.code] || `ログインに失敗しました（${e.code || e.message}）`;
     showGate('login', { error: msg });
