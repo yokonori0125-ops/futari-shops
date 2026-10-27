@@ -1,6 +1,6 @@
-# ご飯屋さんリスト
+# 美味しいもの食べいこ！
 
-行きたいご飯屋さんをリスト化して、**招待した相手とふたりだけで、リアルタイムに共有**する Web アプリです。
+「美味しいもの食べいこ！」は、行きたいお店をリスト化して、**招待した相手とふたりだけで、リアルタイムに共有**する Web アプリです。
 画面は `index.html` 1ファイル（GitHub Pages で公開）、データは Firebase（Authentication + Firestore）に保存します。
 
 公開URL: https://yokonori0125-ops.github.io/futari-shops/

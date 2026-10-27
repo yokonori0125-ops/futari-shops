@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ご飯屋さんリスト</title>
-<meta name="description" content="ふたりで行きたいご飯屋さんをリスト化して共有するWebアプリ">
-<meta name="apple-mobile-web-app-title" content="ご飯屋さんリスト">
-<meta name="application-name" content="ご飯屋さんリスト">
+<title>美味しいもの食べいこ！</title>
+<meta name="description" content="美味しいもの食べいこ！ — ふたりで行きたいお店をリスト化して共有するWebアプリ">
+<meta name="apple-mobile-web-app-title" content="美味しいもの食べいこ！">
+<meta name="application-name" content="美味しいもの食べいこ！">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff">
@@ -298,6 +298,12 @@
   .img-preview .grow { flex: 1; display: grid; gap: 6px; justify-items: start; }
   .img-preview .ok-note { color: var(--ok-ink); }
   .img-preview .diag { font-size: 12.5px; }
+  .err-box { display: grid; gap: 8px; justify-items: start; width: 100%; }
+  .err-box .err-head { color: var(--danger); font-weight: 700; }
+  .err-box .err-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; background: var(--danger-soft); color: var(--danger); border-radius: 6px; padding: 1px 6px; margin-right: 4px; }
+  .err-box .err-hint { color: var(--muted); font-size: 13px; }
+  .err-box .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .diag li code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .img-preview .diag summary { cursor: pointer; color: var(--navy-2); }
   .img-preview .diag ul { margin: 6px 0 0; padding-left: 18px; }
   /* 食べログの評価 */
@@ -516,7 +522,7 @@
 <div id="gate" class="gate">
   <div class="gate-card">
     <div class="gate-logo">食</div>
-    <h1>ご飯屋さんリスト</h1>
+    <h1>美味しいもの食べいこ！</h1>
     <div id="gateBody"><p class="gate-loading">読み込み中…</p></div>
   </div>
 </div>
@@ -527,7 +533,7 @@
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">食</span>
       <div style="min-width:0">
-        <h1>ご飯屋さんリスト</h1>
+        <h1>美味しいもの食べいこ！</h1>
         <span class="net" id="netStatus" hidden>オフライン（つながると自動で送信）</span>
       </div>
     </div>
@@ -682,6 +688,7 @@
 
     <div class="panel">
       <h2>データ</h2>
+      <div id="tabelogStatus" hidden style="margin:0 0 12px"></div>
       <div class="note" id="legacyBox" hidden style="margin:0 0 12px">
         この端末に、ログイン機能を入れる前に保存したお店が <b id="legacyCount"></b> 件残っています。
         <div style="margin-top:8px"><button class="btn sm primary" data-action="import-legacy">このリストに取り込む</button></div>
@@ -1346,7 +1353,7 @@ function showGate(state, opts = {}) {
     html = `<p class="gate-loading">${esc(opts.text || '読み込み中…')}</p>`;
   } else if (state === 'login') {
     html = `
-      <p>ふたりだけで使う、行きたいご飯屋さんのリストです。<br>Google アカウントでログインしてください。</p>
+      <p>ふたりだけで使う、行きたいお店のリストです。<br>Google アカウントでログインしてください。</p>
       ${pendingJoin() ? '<div class="gate-info">招待リンクから開きました。ログインすると、リストの作成者に参加申請が届きます。</div>' : ''}
       ${isInAppBrowser() ? '<div class="gate-err">LINE などのアプリ内ブラウザでは Google ログインができません。メニューから「ブラウザで開く」（Safari / Chrome）を選んでください。</div>' : ''}
       ${err}
@@ -1610,6 +1617,12 @@ function renderSettings() {
   const migrated = lsGet(`futari-migrated-${session.spaceId}`);
   $('#legacyBox').hidden = !legacy.shops.length || !!migrated;
   $('#legacyCount').textContent = legacy.shops.length;
+  // 食べログ情報の自動取得が止まっているときは、エラーコードを表示
+  const st = $('#tabelogStatus');
+  let lastErr = null;
+  try { lastErr = JSON.parse(lsGet(BF_ERROR_KEY)); } catch {}
+  st.hidden = !(bfStopped && lastErr);
+  if (!st.hidden) st.innerHTML = `<div class="note">${errorBoxHTML(lastErr.code, lastErr.diags || [], false, '食べログ情報の自動取得を一時停止しています（3件続けて取得できませんでした）。次にアプリを開いたときに再開します。')}</div>`;
 
   const used = kind => countBy(db.shops.flatMap(s => s[kind]));
   for (const [kind, el] of [['genres', $('#mGenres')], ['moods', $('#mMoods')]]) {
@@ -2094,24 +2107,63 @@ function lsInfo(url, value) {
   } catch { return null; }
 }
 // 取得失敗の理由（画面に表示して原因を特定できるようにする）
-class FetchError extends Error {}
+/* ---- エラーコード ----
+   取得元ごとの原因：<取得元>-E<番号>（例: ML-E03 = Microlink が利用回数の上限）
+   全体の原因　　　：TL-<番号>（画面に表示し、対処方法も案内する） */
+const SOURCE_CODES = { microlink: 'ML', jina: 'JN', allorigins: 'AO', render: 'MR' };
+const ERROR_CODES = {
+  E01: '時間内に応答がなかった',
+  E02: '接続できなかった（通信エラー・ブラウザの制限）',
+  E03: '利用回数の上限に達した（HTTP 429）',
+  E04: 'リクエストを拒否された（HTTP 4xx）',
+  E05: '取得サービス側のエラー（HTTP 5xx）',
+  E06: '食べログ以外の画面が返った（アクセス拒否・確認画面など）',
+  E07: '取得サービスが「失敗」を返した',
+  E08: '上限に達したため、このアプリが一時的に使用を止めている',
+  E09: '応答の形式が不正で読み取れなかった',
+};
+const SUMMARY_CODES = {
+  'TL-01': { msg: '端末がオフラインです', hint: 'インターネットにつながる状態で「もう一度試す」を押してください。' },
+  'TL-02': { msg: '取得サービスの利用回数の上限に達しました', hint: '数時間〜翌日に再度お試しください。ジャンル・画像は手動でも設定できます。' },
+  'TL-03': { msg: '食べログが取得サービスからのアクセスを拒否しました', hint: '時間をおいて再度お試しください。続く場合は「コードをコピー」して開発者に伝えてください。' },
+  'TL-04': { msg: '取得サービスが応答しませんでした（障害・混雑）', hint: '時間をおいて再度お試しください。' },
+  'TL-05': { msg: '取得サービスに接続できませんでした', hint: '通信環境（フィルタリングや社内Wi-Fiの制限など）を確認してください。' },
+  'TL-10': { msg: '食べログのお店のページのURLではありません', hint: 'お店のページを開いてURLをコピーしてください（例: https://tabelog.com/tokyo/A1303/A130302/13012345/）。' },
+  'TL-99': { msg: '原因を特定できませんでした', hint: '「コードをコピー」して開発者に伝えてください。' },
+};
+class FetchError extends Error {
+  constructor(code, detail = '') { super(ERROR_CODES[code] + (detail ? `（${detail}）` : '')); this.code = code; this.detail = detail; }
+}
 async function request(url, ms, { as = 'json', headers } = {}) {
   let r;
   try { r = await fetch(url, { headers, signal: AbortSignal.timeout(ms) }); }
-  catch (e) { throw new FetchError(e?.name === 'TimeoutError' ? `${ms / 1000}秒で応答なし` : '接続できない（通信エラー・CORS）'); }
+  catch (e) { throw e?.name === 'TimeoutError' ? new FetchError('E01', `${ms / 1000}秒`) : new FetchError('E02'); }
   if (!r.ok) {
-    let detail = '';
-    try { const j = await r.clone().json(); detail = j?.code || j?.message || ''; } catch {}
-    const e = new FetchError(r.status === 429 ? '利用回数の上限に達した（429）' : `HTTP ${r.status}${detail ? ` ${detail}` : ''}`);
+    let detail = `HTTP ${r.status}`;
+    try { const j = await r.clone().json(); if (j?.code) detail += ` ${j.code}`; } catch {}
+    const e = new FetchError(r.status === 429 ? 'E03' : r.status >= 500 ? 'E05' : 'E04', detail);
     e.status = r.status;
     throw e;
   }
-  return as === 'json' ? r.json() : r.text();
+  try { return as === 'json' ? await r.json() : await r.text(); }
+  catch { throw new FetchError('E09'); }
 }
+// 取得元ごとの結果から、全体の原因（TL-xx）を決める
+function summarizeFailure(diags) {
+  if (!navigator.onLine) return 'TL-01';
+  const codes = diags.map(d => d.code).filter(c => c && c !== 'OK' && c !== 'SKIP');
+  if (!codes.length) return 'TL-99';
+  if (codes.every(c => c === 'E02')) return 'TL-05';
+  if (codes.some(c => c === 'E06' || c === 'E04')) return codes.some(c => c === 'E03' || c === 'E08') && !codes.includes('E06') ? 'TL-02' : 'TL-03';
+  if (codes.some(c => c === 'E03' || c === 'E08')) return 'TL-02';
+  if (codes.every(c => ['E01', 'E05', 'E07', 'E09', 'E02'].includes(c))) return 'TL-04';
+  return 'TL-99';
+}
+const diagLine = d => `${d.src}-${d.code} ${d.label}：${d.text}`;
 const microlinkBlocked = () => Number(lsGet(ML_BLOCK_KEY) || 0) > Date.now();
 // render=false：ページを描画せずにHTMLだけ読む（速い）／true：ブラウザで描画して読む（遅い）
 async function viaMicrolink(pageUrl, render = false) {
-  if (microlinkBlocked()) throw new FetchError('1日の利用上限に達したため、しばらく使用を止めています');
+  if (microlinkBlocked()) throw new FetchError('E08', `${new Date(Number(lsGet(ML_BLOCK_KEY))).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}まで`);
   const q = new URLSearchParams({ url: pageUrl, 'data.rating.selector': RATING_SELECTOR, 'data.rating.attr': 'text' });
   if (!render) q.set('prerender', 'false');
   let j;
@@ -2120,7 +2172,7 @@ async function viaMicrolink(pageUrl, render = false) {
     if (e.status === 429) lsSet(ML_BLOCK_KEY, String(Date.now() + 6 * 60 * 60 * 1000)); // 上限に達したら6時間は使わない
     throw e;
   }
-  if (j?.status !== 'success') throw new FetchError(`失敗（${j?.code || j?.status || '不明'}）`);
+  if (j?.status !== 'success') throw new FetchError('E07', j?.code || j?.status || '');
   const d = j.data || {};
   return { image: d.image?.url || '', rating: parseRating(d.rating), title: d.title || '', description: d.description || '', cuisine: '' };
 }
@@ -2146,7 +2198,6 @@ function toInfo(parts) {
 }
 const isComplete = i => i.ok && !!i.image && i.rating != null && i.genres.length > 0;
 const isUsable = i => i.ok && (!!i.image || i.genres.length > 0);
-const describe = r => isTabelogPage(r) ? 'OK' : `食べログのページではない応答（${String(r?.title || 'タイトルなし').slice(0, 30)}）`;
 
 // 取得元を順に試す：前が失敗したらすぐ次へ、2.5秒で返らなければ次も並行して始め、完全な結果がそろった時点で終える
 function runSources(pageUrl, sources, onUsable) {
@@ -2161,8 +2212,16 @@ function runSources(pageUrl, sources, onUsable) {
       const src = sources[idx++];
       running++;
       src.run(pageUrl)
-        .then(r => { diags.push(`${src.label}: ${describe(r)}`); if (isTabelogPage(r)) results.push(r); else src.onForeign?.(); })
-        .catch(e => diags.push(`${src.label}: ${e instanceof FetchError ? e.message : (e?.message || '失敗')}`))
+        .then(r => {
+          if (isTabelogPage(r)) { results.push(r); diags.push({ src: src.code, label: src.label, code: 'OK', text: '取得できた' }); }
+          else {
+            src.onForeign?.();
+            diags.push({ src: src.code, label: src.label, code: 'E06', text: `${ERROR_CODES.E06}（画面のタイトル: ${String(r?.title || 'なし').slice(0, 30)}）` });
+          }
+        })
+        .catch(e => diags.push(e?.code === 'SKIP'
+          ? { src: src.code, label: src.label, code: 'SKIP', text: '不要のため使わなかった' }
+          : { src: src.code, label: src.label, code: e?.code || 'E09', text: e?.message || '失敗' }))
         .finally(() => {
           running--;
           const info = toInfo(results);
@@ -2189,14 +2248,15 @@ function fetchTabelogInfo(pageUrl, { fresh = false } = {}) {
   const full = (async () => {
     let foreign = false; // 描画なしの取得で、食べログ以外の画面（アクセス拒否など）が返った
     const sources = [
-      { label: 'Microlink', run: u => viaMicrolink(u), onForeign: () => { foreign = true; } },
-      { label: 'Jina Reader', run: viaJina },
-      { label: 'AllOrigins', run: viaAllOrigins },
+      { code: SOURCE_CODES.microlink, label: 'Microlink', run: u => viaMicrolink(u), onForeign: () => { foreign = true; } },
+      { code: SOURCE_CODES.jina, label: 'Jina Reader', run: viaJina },
+      { code: SOURCE_CODES.allorigins, label: 'AllOrigins', run: viaAllOrigins },
       // 描画なしで食べログ以外の画面が返ったときだけ、最後に描画ありで取り直す（利用回数を節約）
-      { label: 'Microlink（描画あり）', run: u => foreign ? viaMicrolink(u, true) : Promise.reject(new FetchError('不要のため省略')) },
+      { code: SOURCE_CODES.render, label: 'Microlink（描画あり）', run: u => foreign ? viaMicrolink(u, true) : Promise.reject(Object.assign(new Error('skip'), { code: 'SKIP' })) },
     ];
     const { results, diags } = await runSources(pageUrl, sources, i => resolveFirst(i));
     const info = { ...toInfo(results), diags };
+    if (!info.ok) info.errorCode = summarizeFailure(diags);
     resolveFirst(info);
     // 読めた結果だけを保存する（読めなかったときは保存せず、次回また取得する）
     if (info.ok) { const { diags: _, ...keep } = info; infoCache.set(pageUrl, keep); lsInfo(pageUrl, keep); }
@@ -2218,15 +2278,32 @@ function renderImagePreview() {
   } else if (form.image) {
     el.innerHTML = `<img src="${esc(form.image)}" alt="" referrerpolicy="no-referrer" decoding="async"><div class="grow">${rating}${more}${autoNote}<span>お店の画像を一覧に表示します。</span><button type="button" class="btn sm" data-action="remove-image">画像を表示しない</button></div>`;
   } else if (form.imageState === 'failed') {
-    const diag = (form.diags || []).map(d => `<li>${esc(d)}</li>`).join('');
-    el.innerHTML = `<div class="grow"><span>食べログの情報を取得できませんでした。少し時間をおいて試すか、ジャンル・画像は手動で設定してください。</span>
-      <button type="button" class="btn sm" data-action="refetch-image">もう一度試す</button>
-      ${diag ? `<details class="diag"><summary>詳しい原因</summary><ul>${diag}</ul></details>` : ''}</div>`;
+    el.innerHTML = errorBoxHTML(form.errorCode || 'TL-99', form.diags || [], true);
   } else if (rating || form.ratingFrom || autoNote || more) {
     el.innerHTML = `<div class="grow">${rating || more || '<span>食べログの評価はまだありません。</span>'}${autoNote}</div>`;
   } else {
     el.innerHTML = '';
   }
+}
+// エラー表示（全体のコード・対処方法・取得元ごとの詳細・コピー用ボタン）
+function errorBoxHTML(code, diags, retry, lead = '食べログの情報を取得できませんでした。') {
+  const sum = SUMMARY_CODES[code] || SUMMARY_CODES['TL-99'];
+  const rows = diags.map(d => `<li><code>${esc(d.src)}-${esc(d.code)}</code> ${esc(d.label)}：${esc(d.text)}</li>`).join('');
+  return `<div class="err-box" data-err-code="${esc(code)}">
+    <span>${esc(lead)}</span>
+    <span class="err-head"><span class="err-code">${esc(code)}</span>${esc(sum.msg)}</span>
+    <span class="err-hint">${esc(sum.hint)}</span>
+    <div class="btns">${retry ? '<button type="button" class="btn sm" data-action="refetch-image">もう一度試す</button>' : ''}<button type="button" class="btn sm" data-action="copy-error">コードをコピー</button></div>
+    ${rows ? `<details class="diag"><summary>詳しい原因（取得元ごと）</summary><ul>${rows}</ul></details>` : ''}
+  </div>`;
+}
+async function copyErrorReport(box) {
+  const code = box.dataset.errCode;
+  const lines = [...box.querySelectorAll('.diag li')].map(li => li.textContent.trim());
+  const text = [`美味しいもの食べいこ！ エラー ${code}：${(SUMMARY_CODES[code] || SUMMARY_CODES['TL-99']).msg}`, ...lines,
+    `URL: ${$('#fTabelog')?.value || '-'}`, `日時: ${new Date().toLocaleString('ja-JP')}`, `端末: ${navigator.userAgent}`].join('\n');
+  try { await navigator.clipboard.writeText(text); toast('エラーの内容をコピーしました'); }
+  catch { await choose({ title: 'エラーの内容', message: text, buttons: [{ label: '閉じる', value: null }] }); }
 }
 let imgTimer;
 // 食べログのリンクを消したときは、そのリンクから取ったもの（画像・評価・自動で選んだジャンル）も外す
@@ -2273,7 +2350,7 @@ async function fetchFormImage({ applyGenres = false } = {}) {
       if (info.rating != null || final) Object.assign(form, { rating: info.rating ?? (form.ratingFrom === top ? form.rating : null), ratingFrom: top, ratingAt: Date.now() });
     }
     form.imageState = final ? (info.ok ? '' : 'failed') : (info.ok ? 'more' : 'loading');
-    if (final) form.diags = info.diags || [];
+    if (final) { form.diags = info.diags || []; form.errorCode = info.errorCode || ''; }
     if (final) form.pending = null;
     renderImagePreview();
   };
@@ -2283,7 +2360,12 @@ async function fetchFormImage({ applyGenres = false } = {}) {
 $('#fTabelog').addEventListener('input', e => {
   clearTimeout(imgTimer);
   const top = tabelogTop($('#fTabelog').value);
-  if (!top) { clearTabelogForm(); return; }
+  if (!top) {
+    clearTabelogForm();
+    // 食べログのURLだがお店のページではない（検索結果・ランキングなど）
+    if (/tabelog\.com/i.test($('#fTabelog').value)) $('#imgPreview').innerHTML = errorBoxHTML('TL-10', [], false, '食べログの情報を取得できません。');
+    return;
+  }
   if (top === form.imageFrom && top === form.ratingFrom) return;
   // 貼り付けはすぐに取得、手入力は打ち終わるのを少し待つ
   const pasted = e.inputType === 'insertFromPaste' || e.inputType === 'insertReplacementText' || !e.inputType;
@@ -2292,6 +2374,7 @@ $('#fTabelog').addEventListener('input', e => {
 // 食べログのリンクがあるのに画像・評価が未取得（または1週間以上前）のお店を、裏で1件ずつ更新する（相手の画面にも反映）
 const imageTried = new Set();
 let bfWorkers = 0, bfFailures = 0, bfStopped = false;
+const BF_ERROR_KEY = 'futari-tabelog-last-error';
 const BF_PARALLEL = 3;
 // 食べログの情報で、更新が必要なもの
 const INFO_V = 2;
@@ -2318,7 +2401,12 @@ async function backfillWorker() {
     const info = await fetchTabelogInfo(top, { fresh }).full;
     if (!info.ok) {
       // 続けて読めないときは、取得先の利用回数を使い切らないよう、この起動中の自動取得を止める
-      if (++bfFailures >= 3) { bfStopped = true; console.warn('自動取得を一時停止:', info.diags); }
+      if (++bfFailures >= 3) {
+        bfStopped = true;
+        lsSet(BF_ERROR_KEY, JSON.stringify({ code: info.errorCode || 'TL-99', diags: info.diags || [], at: Date.now() }));
+        console.warn('自動取得を一時停止:', info.errorCode, (info.diags || []).map(diagLine));
+        if (ui.tab === 'settings') renderSettings();
+      }
       continue; // 何も書き込まず、次回の起動時に再挑戦
     }
     bfFailures = 0;
@@ -2454,9 +2542,9 @@ $('#shopForm').addEventListener('submit', e => {
    ========================================================= */
 async function shareInvite() {
   const url = inviteUrl();
-  const text = '「ご飯屋さんリスト」に招待します。リンクを開いて Google でログインしてください。';
+  const text = '「美味しいもの食べいこ！」に招待します。リンクを開いて Google でログインしてください。';
   if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
-    try { await navigator.share({ title: 'ご飯屋さんリスト', text, url }); return; } catch (e) { if (e.name === 'AbortError') return; }
+    try { await navigator.share({ title: '美味しいもの食べいこ！', text, url }); return; } catch (e) { if (e.name === 'AbortError') return; }
   }
   try {
     await navigator.clipboard.writeText(url);
@@ -2742,6 +2830,7 @@ document.addEventListener('click', async e => {
     }
     case 'geocode': runGeocode(); break;
     case 'remove-image': form.image = ''; form.imageFrom = tabelogTop($('#fTabelog').value) || ''; form.imageHidden = true; form.imageState = ''; renderImagePreview(); break;
+    case 'copy-error': copyErrorReport(a.closest('.err-box')); break;
     case 'refetch-image': { const t = tabelogTop($('#fTabelog').value); infoCache.delete(t); lsInfo(t, null); fetchFormImage({ applyGenres: !form.genresApplied }); break; }
     case 'pick-geo': {
       $('#fCoords').value = fmtPos({ lat: +a.dataset.lat, lng: +a.dataset.lng });
