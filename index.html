@@ -288,14 +288,49 @@
     opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 2000; max-width: calc(100vw - 32px);
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  /* ---------- gate (login) ---------- */
+  .gate { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
+  .gate-card {
+    width: min(420px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+    padding: 32px 24px 24px; box-shadow: var(--shadow); text-align: center; display: grid; gap: 14px;
+  }
+  .gate-logo {
+    width: 56px; height: 56px; border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+    display: grid; place-items: center; font-size: 26px; font-weight: 700; margin: 0 auto;
+  }
+  .gate-card h1 { font-size: 20px; margin: 0; }
+  #gateBody { display: grid; gap: 14px; }
+  #gateBody p { margin: 0; color: var(--muted); font-size: 14px; }
+  .btn.big { padding: 12px 16px; font-size: 15px; width: 100%; }
+  .gate-err, .gate-info { font-size: 13.5px; text-align: left; border-radius: 10px; padding: 10px 12px; }
+  .gate-err { color: var(--danger); background: var(--surface-2); }
+  .gate-info { color: var(--ok); background: var(--ok-soft); }
+  .gate-loading { padding: 16px 0; }
+  .net { font-size: 12px; color: var(--warn); margin-left: 8px; font-weight: 600; }
+  .card .by { margin-left: 2px; }
+  .member { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 14.5px; }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-soft-ink);
+    display: grid; place-items: center; font-weight: 700; flex-shrink: 0;
+  }
+  #inviteUrl { font-size: 13px; color: var(--muted); }
 </style>
 </head>
 <body>
 
+<div id="gate" class="gate">
+  <div class="gate-card">
+    <div class="gate-logo">食</div>
+    <h1>ふたりの行きたいお店</h1>
+    <div id="gateBody"><p class="gate-loading">読み込み中…</p></div>
+  </div>
+</div>
+
+<div id="app" hidden>
 <header class="app-header">
   <div class="wrap">
     <div class="bar">
-      <h1>ふたりの行きたいお店</h1>
+      <h1>ふたりの行きたいお店<span class="net" id="netStatus" hidden>オフライン（つながると自動で送信）</span></h1>
       <span class="count" id="headerCount"></span>
     </div>
     <nav class="tabs" role="tablist">
@@ -370,15 +405,17 @@
   <!-- 設定・共有 -->
   <section id="tab-settings" hidden>
     <div class="panel">
-      <h2>ふたりで共有する</h2>
-      <p>このページは静的HTMLのため、データはそれぞれの端末のブラウザに保存されます。相手とは「共有リンク」か「JSONファイル」で受け渡しします。受け取った側は<strong>統合</strong>を選ぶと、両方のリストが合わさります（同じお店は新しく編集された方を採用）。</p>
-      <div class="row">
-        <button class="btn primary" id="shareLink">共有リンクを作成</button>
-        <button class="btn" id="exportJson">JSONを書き出す</button>
-        <button class="btn" id="importJsonBtn">JSONを読み込む</button>
-        <input type="file" id="importJson" accept="application/json,.json" hidden>
+      <h2>メンバー</h2>
+      <div id="members"></div>
+      <div id="inviteBox">
+        <p style="margin-top:12px">相手にこの<strong>招待リンク</strong>を送ってください。相手が開いて Google でログインすると、このリストに参加します。</p>
+        <div class="row">
+          <input type="text" id="inviteUrl" readonly>
+          <button class="btn primary" data-action="share-invite">送る / コピー</button>
+        </div>
+        <div class="note">2人目が参加した時点で、このリンクからは誰も参加できなくなります。リストを見たり編集したりできるのは、参加した2人だけです。</div>
       </div>
-      <div class="note warn" id="fileWarn" hidden>いまはローカルファイル（file://）として開いているため、共有リンクは相手の端末では開けません。GitHub Pages や Netlify などに置いて https で公開すると共有リンクが使えます。それまではJSONファイルで受け渡ししてください。</div>
+      <div class="note" id="fullNote" hidden>ふたりがそろっています。招待リンクは無効になり、ほかの人は参加できません。</div>
     </div>
 
     <div class="panel">
@@ -394,9 +431,9 @@
         <ol>
           <li>プロジェクトを作成し、<b>Maps JavaScript API</b> と <b>Geocoding API</b> を有効化</li>
           <li>「認証情報」でAPIキーを作成</li>
-          <li>キーの制限で「ウェブサイト」を選び、このページのURL（例: <code>https://example.github.io/*</code>）だけを許可</li>
+          <li>キーの制限で「ウェブサイト」を選び、<code>https://yokonori0125-ops.github.io/*</code> だけを許可</li>
         </ol>
-        キーはこの端末にのみ保存され、共有リンクやJSONには含まれません。
+        キーはこの端末にのみ保存されます（相手の端末では相手が設定します）。
       </div>
     </div>
 
@@ -414,15 +451,31 @@
 
     <div class="panel">
       <h2>データ</h2>
+      <div class="note" id="legacyBox" hidden style="margin:0 0 12px">
+        この端末に、ログイン機能を入れる前に保存したお店が <b id="legacyCount"></b> 件残っています。
+        <div style="margin-top:8px"><button class="btn sm primary" data-action="import-legacy">このリストに取り込む</button></div>
+      </div>
       <div class="row">
+        <button class="btn" id="exportJson">JSONを書き出す（バックアップ）</button>
+        <button class="btn" id="importJsonBtn">JSONを読み込む</button>
+        <input type="file" id="importJson" accept="application/json,.json" hidden>
+      </div>
+      <div class="row" style="margin-top:8px">
         <button class="btn" data-action="sample">サンプルのお店を追加</button>
         <button class="btn danger" id="wipe">すべて削除</button>
       </div>
+    </div>
+
+    <div class="panel">
+      <h2>アカウント</h2>
+      <p id="accountInfo"></p>
+      <button class="btn" data-action="logout">ログアウト</button>
     </div>
   </section>
 </main>
 
 <button class="fab" id="addBtn">＋ お店を追加</button>
+</div>
 
 <!-- お店の追加・編集 -->
 <dialog id="shopDialog" aria-labelledby="shopDialogTitle">
@@ -492,14 +545,28 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script>
-'use strict';
+<script type="module">
+/* =========================================================
+   Firebase 設定
+   ========================================================= */
+const FIREBASE_VERSION = '12.19.0';
+const FB_BASE = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
+// ページに公開する前提の値（アクセス制御は Firestore のセキュリティルールで行う）
+const firebaseConfig = {
+  apiKey: 'AIzaSyBD807c1qje4BVY_htOYYERClIAaNu_Tno',
+  authDomain: 'gohan-sagasooo.firebaseapp.com',
+  projectId: 'gohan-sagasooo',
+  storageBucket: 'gohan-sagasooo.firebasestorage.app',
+  messagingSenderId: '717463731454',
+  appId: '1:717463731454:web:4a21a4a2e12aaae4d1f9af',
+};
 
 /* =========================================================
    定数・ユーティリティ
    ========================================================= */
-const STORE_KEY = 'futari-shops-v1';
+const LEGACY_KEY = 'futari-shops-v1'; // ログイン機能を入れる前のローカル保存データ
 const GM_KEY = 'futari-gmaps-key';
+const JOIN_KEY = 'futari-pending-join';
 const NO_AREA = 'エリア未設定';
 const DEFAULT_CENTER = { lat: 35.681, lng: 139.767 }; // 東京駅
 const DEFAULT_GENRES = ['和食', '寿司', '焼肉', '焼き鳥', 'ラーメン', 'そば・うどん', '居酒屋', 'イタリアン', 'フレンチ', '中華', '韓国料理', 'エスニック', 'カレー', 'ハンバーガー', 'カフェ', 'スイーツ', 'パン', 'バー'];
@@ -513,6 +580,9 @@ const uniq = a => [...new Set(a.map(x => String(x).trim()).filter(Boolean))];
 const hasPos = s => s.lat != null && s.lng != null;
 const fmtPos = p => `${(+p.lat).toFixed(6)}, ${(+p.lng).toFixed(6)}`;
 const countBy = arr => arr.reduce((m, k) => (m[k] = (m[k] || 0) + 1, m), {});
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
 
 function safeUrl(u) {
   try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch { return ''; }
@@ -574,7 +644,7 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
 }
 
 // 選択肢ダイアログ（戻り値: 選ばれたボタンの value / キャンセル時 null）
@@ -592,11 +662,8 @@ function choose({ title, message = '', buttons }) {
 }
 
 /* =========================================================
-   データ（localStorage）
+   データ
    ========================================================= */
-function emptyDb() {
-  return { version: 1, shops: [], genres: [...DEFAULT_GENRES], moods: [...DEFAULT_MOODS], deleted: {} };
-}
 function normShop(s) {
   if (!s || typeof s !== 'object' || !String(s.name || '').trim()) return null;
   const arr = a => Array.isArray(a) ? uniq(a) : [];
@@ -605,7 +672,7 @@ function normShop(s) {
   const ok = validPos(lat, lng);
   const now = Date.now();
   return {
-    id: String(s.id || uid()),
+    id: String(s.id || uid()).replace(/\//g, '_'),
     name: String(s.name).trim().slice(0, 200),
     area: String(s.area || '').trim().slice(0, 60),
     genres: arr(s.genres),
@@ -617,60 +684,308 @@ function normShop(s) {
     visited: !!s.visited,
     lat: ok ? lat : null,
     lng: ok ? lng : null,
+    addedBy: String(s.addedBy || ''),
     createdAt: Number(s.createdAt) || now,
     updatedAt: Number(s.updatedAt) || now,
   };
 }
-function normDb(d) {
-  const base = emptyDb();
-  if (!d || typeof d !== 'object') return base;
-  const deleted = {};
-  if (d.deleted && typeof d.deleted === 'object') {
-    for (const [k, v] of Object.entries(d.deleted)) if (Number(v)) deleted[k] = Number(v);
-  }
+function normImport(d) {
+  if (!d || typeof d !== 'object') throw new Error('invalid');
   return {
-    version: 1,
     shops: (Array.isArray(d.shops) ? d.shops : []).map(normShop).filter(Boolean),
-    genres: Array.isArray(d.genres) ? uniq(d.genres) : base.genres,
-    moods: Array.isArray(d.moods) ? uniq(d.moods) : base.moods,
-    deleted,
+    genres: Array.isArray(d.genres) ? uniq(d.genres) : [],
+    moods: Array.isArray(d.moods) ? uniq(d.moods) : [],
   };
 }
-function load() {
+function loadLegacy() {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
-    return raw ? normDb(JSON.parse(raw)) : emptyDb();
-  } catch { return emptyDb(); }
-}
-function save() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
-  catch { toast('保存できませんでした（ブラウザの保存領域を確認してください）'); }
-}
-// 2つのデータを統合：同じIDは updatedAt が新しい方、削除記録より古いものは除外
-function mergeDb(a, b) {
-  const deleted = { ...a.deleted };
-  for (const [k, v] of Object.entries(b.deleted)) deleted[k] = Math.max(deleted[k] || 0, v);
-  const byId = new Map(a.shops.map(s => [s.id, s]));
-  for (const s of b.shops) {
-    const cur = byId.get(s.id);
-    if (!cur || s.updatedAt > cur.updatedAt) byId.set(s.id, s);
-  }
-  return {
-    version: 1,
-    shops: [...byId.values()].filter(s => !(deleted[s.id] >= s.updatedAt)),
-    genres: uniq([...a.genres, ...b.genres]),
-    moods: uniq([...a.moods, ...b.moods]),
-    deleted,
-  };
+    const raw = localStorage.getItem(LEGACY_KEY);
+    return raw ? normImport(JSON.parse(raw)) : { shops: [], genres: [], moods: [] };
+  } catch { return { shops: [], genres: [], moods: [] }; }
 }
 
-let db = load();
+// 画面に表示している内容（Firestore の内容をリアルタイムで反映）
+let db = { shops: [], genres: [...DEFAULT_GENRES], moods: [...DEFAULT_MOODS] };
+const session = { user: null, spaceId: null, space: null, loaded: false, unsubs: [], infoSynced: false };
 const ui = {
-  tab: 'list', q: '', status: 'all', match: 'any', sort: 'new',
+  tab: 'list', q: '', status: 'all', match: 'any', sort: lsGet('futari-sort') || 'new',
   areas: new Set(), genres: new Set(), moods: new Set(),
   filtersOpen: window.innerWidth > 760,
 };
-try { ui.sort = localStorage.getItem('futari-sort') || 'new'; } catch {}
+
+/* =========================================================
+   Firebase（ログイン・部屋・同期）
+   ========================================================= */
+let fb = null;
+
+const myName = () => {
+  const u = session.user;
+  return (u?.displayName || (u?.email || '').split('@')[0] || 'メンバー').slice(0, 40);
+};
+const spaceRef = () => fb.doc(fb.fs, 'spaces', session.spaceId);
+const shopsCol = () => fb.collection(fb.fs, 'spaces', session.spaceId, 'shops');
+const userRef = () => fb.doc(fb.fs, 'users', session.user.uid);
+const inviteUrl = () => `${location.origin}${location.pathname}?openExternalBrowser=1#join=${session.spaceId}`;
+const isInAppBrowser = () => /\bLine\/|FBAN|FBAV|Instagram|MicroMessenger/i.test(navigator.userAgent);
+
+function errText(e) {
+  const map = {
+    'permission-denied': '権限がありません',
+    'unavailable': 'サーバーに接続できません',
+    'failed-precondition': '処理を続けられませんでした',
+  };
+  return map[e?.code] || e?.code || e?.message || '不明なエラー';
+}
+function writeErr(e) {
+  console.error(e);
+  toast(`保存できませんでした（${errText(e)}）`);
+}
+
+// 招待リンク（#join=部屋ID）はログインをまたいで保持する
+function capturePendingJoin() {
+  const m = location.hash.match(/^#join=([A-Za-z0-9]{10,40})$/);
+  if (m) {
+    try { sessionStorage.setItem(JOIN_KEY, m[1]); } catch {}
+    history.replaceState(null, '', location.pathname);
+  }
+}
+const pendingJoin = () => { try { return sessionStorage.getItem(JOIN_KEY); } catch { return null; } };
+const clearPendingJoin = () => { try { sessionStorage.removeItem(JOIN_KEY); } catch {} };
+
+async function boot() {
+  capturePendingJoin();
+  showGate('loading');
+  try {
+    const [appMod, authMod, fsMod] = await Promise.all([
+      import(`${FB_BASE}/firebase-app.js`),
+      import(`${FB_BASE}/firebase-auth.js`),
+      import(`${FB_BASE}/firebase-firestore.js`),
+    ]);
+    const app = appMod.initializeApp(firebaseConfig);
+    let fs;
+    try {
+      // 電波が悪いときも端末に一時保存し、つながったら自動で送信する
+      fs = fsMod.initializeFirestore(app, {
+        localCache: fsMod.persistentLocalCache({ tabManager: fsMod.persistentMultipleTabManager() }),
+      });
+    } catch (e) {
+      console.warn('offline cache unavailable', e);
+      fs = fsMod.getFirestore(app);
+    }
+    fb = { ...authMod, ...fsMod, auth: authMod.getAuth(app), fs };
+  } catch (e) {
+    console.error(e);
+    showGate('error', { error: 'Firebase を読み込めませんでした。インターネット接続を確認して、再読み込みしてください。' });
+    return;
+  }
+  fb.onAuthStateChanged(fb.auth, user => onAuth(user));
+}
+
+function stopListening() {
+  session.unsubs.forEach(f => f());
+  session.unsubs = [];
+  session.spaceId = null;
+  session.space = null;
+  session.loaded = false;
+  session.infoSynced = false;
+  db = { shops: [], genres: [...DEFAULT_GENRES], moods: [...DEFAULT_MOODS] };
+}
+
+async function onAuth(user) {
+  stopListening();
+  session.user = user;
+  if (!user) { showGate('login'); return; }
+  showGate('loading', { text: 'リストを読み込んでいます…' });
+  try {
+    const usnap = await fb.getDoc(userRef());
+    let spaceId = usnap.exists() ? usnap.data().spaceId || null : null;
+    let joinError = '';
+    const joinId = pendingJoin();
+    clearPendingJoin();
+    if (joinId && joinId !== spaceId) {
+      const go = !spaceId || await choose({
+        title: '別のリストに招待されています',
+        message: '招待されたリストに切り替えますか？\n今のリストのデータは消えず、もう一人のメンバーは引き続き使えます。',
+        buttons: [{ label: '今のリストを使う', value: false }, { label: '切り替えて参加', value: true, kind: 'primary' }],
+      });
+      if (go) {
+        try { spaceId = await joinSpace(joinId); toast('リストに参加しました'); }
+        catch (e) { console.warn(e); joinError = '招待リンクから参加できませんでした。リンクが正しくないか、すでに2人が参加しています。'; }
+      }
+    }
+    if (!spaceId) { showGate('nospace', { error: joinError }); return; }
+    if (joinError) toast(joinError);
+    enterSpace(spaceId);
+  } catch (e) {
+    console.error(e);
+    showGate('error', { error: `読み込みに失敗しました（${errText(e)}）。通信状況を確認して再読み込みしてください。` });
+  }
+}
+
+async function joinSpace(id) {
+  // ルール上、メンバー以外が変更できるのは「2人目として自分を追加する」ことだけ
+  await fb.updateDoc(fb.doc(fb.fs, 'spaces', id), { members: fb.arrayUnion(session.user.uid) });
+  await fb.setDoc(userRef(), { spaceId: id, updatedAt: Date.now() });
+  return id;
+}
+
+async function createSpace() {
+  showGate('loading', { text: 'リストを作成しています…' });
+  try {
+    const ref = fb.doc(fb.collection(fb.fs, 'spaces')); // 推測できないランダムなID
+    const me = session.user.uid;
+    await fb.setDoc(ref, {
+      members: [me],
+      memberInfo: { [me]: { name: myName() } },
+      genres: [...DEFAULT_GENRES],
+      moods: [...DEFAULT_MOODS],
+      createdAt: Date.now(),
+    });
+    await fb.setDoc(userRef(), { spaceId: ref.id, updatedAt: Date.now() });
+    enterSpace(ref.id);
+    ui.tab = 'settings';
+    render();
+    toast('リストを作成しました。招待リンクを相手に送ってください');
+  } catch (e) {
+    console.error(e);
+    showGate('nospace', { error: `リストを作成できませんでした（${errText(e)}）` });
+  }
+}
+
+function enterSpace(id) {
+  session.spaceId = id;
+  session.loaded = false;
+  const onErr = e => {
+    console.error(e);
+    stopListening();
+    showGate('nospace', { error: `リストを読み込めませんでした（${errText(e)}）` });
+  };
+  session.unsubs.push(fb.onSnapshot(spaceRef(), snap => {
+    if (!snap.exists()) { onErr({ code: 'not-found' }); return; }
+    const d = snap.data();
+    session.space = d;
+    db.genres = Array.isArray(d.genres) ? d.genres : [...DEFAULT_GENRES];
+    db.moods = Array.isArray(d.moods) ? d.moods : [...DEFAULT_MOODS];
+    // 相手に表示する自分の名前を登録・更新
+    const me = session.user.uid;
+    if (!session.infoSynced && d.memberInfo?.[me]?.name !== myName()) {
+      session.infoSynced = true;
+      fb.updateDoc(spaceRef(), { [`memberInfo.${me}`]: { name: myName() } }).catch(e => console.warn(e));
+    }
+    render();
+  }, onErr));
+  session.unsubs.push(fb.onSnapshot(shopsCol(), snap => {
+    db.shops = snap.docs.map(d => normShop({ ...d.data(), id: d.id })).filter(Boolean);
+    session.loaded = true;
+    render();
+  }, onErr));
+  showApp();
+}
+
+async function login() {
+  try {
+    await fb.signInWithPopup(fb.auth, new fb.GoogleAuthProvider());
+  } catch (e) {
+    if (['auth/popup-closed-by-user', 'auth/cancelled-popup-request'].includes(e.code)) return;
+    console.error(e);
+    const msg = {
+      'auth/popup-blocked': 'ポップアップがブロックされました。ブラウザの設定でこのサイトのポップアップを許可してください。',
+      'auth/unauthorized-domain': 'このドメインが Firebase の「承認済みドメイン」に登録されていません。',
+      'auth/operation-not-allowed': 'Firebase で Google ログインが有効になっていません。',
+      'auth/network-request-failed': '通信に失敗しました。接続を確認してください。',
+    }[e.code] || `ログインに失敗しました（${e.code || e.message}）`;
+    showGate('login', { error: msg });
+  }
+}
+async function logout() {
+  const ok = await choose({
+    title: 'ログアウトしますか？',
+    message: 'リストのデータは消えません。もう一度ログインすれば元に戻ります。',
+    buttons: [{ label: 'キャンセル', value: null }, { label: 'ログアウト', value: true, kind: 'primary' }],
+  });
+  if (ok) await fb.signOut(fb.auth);
+}
+
+// 書き込み（画面は onSnapshot で自動的に更新される）
+function writeShop(shop) {
+  const { id, ...data } = shop;
+  fb.setDoc(fb.doc(shopsCol(), id), data).catch(writeErr);
+}
+function removeShop(id) {
+  fb.deleteDoc(fb.doc(shopsCol(), id)).catch(writeErr);
+}
+function writeMasters() {
+  fb.updateDoc(spaceRef(), { genres: db.genres, moods: db.moods }).catch(writeErr);
+}
+async function commitBatch(sets, deletes = []) {
+  const ops = [...sets.map(s => ['set', s]), ...deletes.map(id => ['del', id])];
+  for (let i = 0; i < ops.length; i += 400) {
+    const b = fb.writeBatch(fb.fs);
+    for (const [type, x] of ops.slice(i, i + 400)) {
+      if (type === 'set') { const { id, ...data } = x; b.set(fb.doc(shopsCol(), id), data); }
+      else b.delete(fb.doc(shopsCol(), x));
+    }
+    await b.commit();
+  }
+}
+// 取り込み：merge = 同じお店は新しく編集された方を採用 / replace = 今のリストを置き換え
+async function importData(incoming, mode) {
+  const me = session.user.uid;
+  const shops = incoming.shops.map(s => ({ ...s, addedBy: s.addedBy || me }));
+  const cur = new Map(db.shops.map(s => [s.id, s]));
+  let sets, dels = [];
+  if (mode === 'replace') {
+    const ids = new Set(shops.map(s => s.id));
+    dels = db.shops.filter(s => !ids.has(s.id)).map(s => s.id);
+    sets = shops;
+  } else {
+    sets = shops.filter(s => !cur.has(s.id) || s.updatedAt > cur.get(s.id).updatedAt);
+  }
+  await commitBatch(sets, dels);
+  const genres = mode === 'replace' && incoming.genres.length ? incoming.genres : uniq([...db.genres, ...incoming.genres]);
+  const moods = mode === 'replace' && incoming.moods.length ? incoming.moods : uniq([...db.moods, ...incoming.moods]);
+  if (genres.join('\n') !== db.genres.join('\n') || moods.join('\n') !== db.moods.join('\n')) {
+    db.genres = genres;
+    db.moods = moods;
+    writeMasters();
+  }
+  return sets.length;
+}
+
+/* =========================================================
+   ログイン前の画面
+   ========================================================= */
+function showGate(state, opts = {}) {
+  $('#app').hidden = true;
+  $('#gate').hidden = false;
+  const err = opts.error ? `<div class="gate-err">${esc(opts.error)}</div>` : '';
+  let html = '';
+  if (state === 'loading') {
+    html = `<p class="gate-loading">${esc(opts.text || '読み込み中…')}</p>`;
+  } else if (state === 'login') {
+    html = `
+      <p>ふたりだけで使う、行きたいお店のリストです。<br>Google アカウントでログインしてください。</p>
+      ${pendingJoin() ? '<div class="gate-info">招待リンクから開きました。ログインするとリストに参加します。</div>' : ''}
+      ${isInAppBrowser() ? '<div class="gate-err">LINE などのアプリ内ブラウザでは Google ログインができません。メニューから「ブラウザで開く」（Safari / Chrome）を選んでください。</div>' : ''}
+      ${err}
+      <button class="btn primary big" data-action="login">Google でログイン</button>`;
+  } else if (state === 'nospace') {
+    html = `
+      <p>${esc(myName())} さん、ようこそ。</p>
+      ${err}
+      <button class="btn primary big" data-action="create-space">新しいリストを作る</button>
+      <p class="small">相手がすでにリストを作っている場合は、ここで作らずに、相手から届いた<b>招待リンク</b>を開いてください。</p>
+      <button class="btn ghost sm" data-action="logout-now">別のアカウントでログイン</button>`;
+  } else {
+    html = `${err}<button class="btn big" data-action="reload">再読み込み</button>`;
+  }
+  $('#gateBody').innerHTML = html;
+}
+function showApp() {
+  $('#gate').hidden = true;
+  $('#app').hidden = false;
+  render();
+}
 
 /* =========================================================
    絞り込み
@@ -705,13 +1020,16 @@ function sorted(list) {
 function activeFilterCount() {
   return ui.areas.size + ui.genres.size + ui.moods.size + (ui.status !== 'all' ? 1 : 0);
 }
+const memberName = id => session.space?.memberInfo?.[id]?.name || '';
 
 /* =========================================================
    描画
    ========================================================= */
 function render() {
+  if ($('#app').hidden) return;
   const visited = db.shops.filter(s => s.visited).length;
   $('#headerCount').textContent = db.shops.length ? `全${db.shops.length}件・行った${visited}件` : '';
+  $('#netStatus').hidden = navigator.onLine;
   $$('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === ui.tab)));
   $('#tab-list').hidden = ui.tab !== 'list';
   $('#tab-map').hidden = ui.tab !== 'map';
@@ -763,11 +1081,12 @@ function cardHTML(s) {
     ...s.genres.map(g => `<span class="tag genre">${esc(g)}</span>`),
     ...s.moods.map(m => `<span class="tag mood">${esc(m)}</span>`),
   ].join('');
+  const by = memberName(s.addedBy);
   return `<article class="card${s.visited ? ' visited' : ''}">
     <div class="card-head">
       <div>
         <h3>${esc(s.name)}</h3>
-        <div class="area">${esc(s.area || NO_AREA)}</div>
+        <div class="area">${esc(s.area || NO_AREA)}${by ? `<span class="by">・${esc(by)}が追加</span>` : ''}</div>
       </div>
       <button class="visit${s.visited ? ' on' : ''}" data-action="toggle-visited" data-id="${esc(s.id)}" title="クリックで切り替え">${s.visited ? '✓ 行った' : '行きたい'}</button>
     </div>
@@ -787,7 +1106,9 @@ function renderList() {
   const total = db.shops.length;
   $('#resultCount').textContent = total ? `${list.length} / ${total} 件を表示` : '';
   const el = $('#cards');
-  if (!total) {
+  if (!session.loaded) {
+    el.innerHTML = '<div class="empty" style="grid-column:1/-1"><p>読み込み中…</p></div>';
+  } else if (!total) {
     el.innerHTML = `<div class="empty" style="grid-column:1/-1">
       <p>まだお店が登録されていません。</p>
       <div class="btns"><button class="btn primary" data-action="add">お店を追加</button><button class="btn" data-action="sample">サンプルを入れてみる</button></div>
@@ -803,10 +1124,25 @@ function renderList() {
 }
 
 function renderSettings() {
-  let key = '';
-  try { key = localStorage.getItem(GM_KEY) || ''; } catch {}
-  $('#gmKey').value = key;
-  $('#fileWarn').hidden = location.protocol !== 'file:';
+  $('#gmKey').value = lsGet(GM_KEY) || '';
+  const sp = session.space || {};
+  const members = sp.members || [];
+  const me = session.user?.uid;
+  $('#members').innerHTML = members.map(id => {
+    const n = memberName(id) || '（名前未設定）';
+    return `<div class="member"><span class="avatar">${esc(n.slice(0, 1))}</span><span>${esc(n)}${id === me ? ' <span class="muted small">（あなた）</span>' : ''}</span></div>`;
+  }).join('');
+  $('#inviteBox').hidden = members.length >= 2;
+  $('#fullNote').hidden = members.length < 2;
+  if (session.spaceId) $('#inviteUrl').value = inviteUrl();
+  const u = session.user;
+  $('#accountInfo').textContent = u ? `ログイン中: ${u.displayName || ''}${u.email ? `（${u.email}）` : ''}` : '';
+
+  const legacy = loadLegacy();
+  const migrated = lsGet(`futari-migrated-${session.spaceId}`);
+  $('#legacyBox').hidden = !legacy.shops.length || !!migrated;
+  $('#legacyCount').textContent = legacy.shops.length;
+
   const used = kind => countBy(db.shops.flatMap(s => s[kind]));
   for (const [kind, el] of [['genres', $('#mGenres')], ['moods', $('#mMoods')]]) {
     const c = used(kind);
@@ -819,7 +1155,7 @@ function renderSettings() {
 /* =========================================================
    地図（Google マップ / キー未設定時は OpenStreetMap）
    ========================================================= */
-function getGmKey() { try { return localStorage.getItem(GM_KEY) || ''; } catch { return ''; } }
+const getGmKey = () => lsGet(GM_KEY) || '';
 let gmAuthFailed = false;
 let gmLoading = null;
 window.gm_authFailure = () => {
@@ -1140,98 +1476,73 @@ $('#shopForm').addEventListener('submit', e => {
     visited: $('#fVisited').checked,
     lat: pos?.lat ?? null,
     lng: pos?.lng ?? null,
+    addedBy: prev?.addedBy || session.user.uid,
     createdAt: prev?.createdAt || Date.now(),
     updatedAt: Date.now(),
   });
-  if (prev) db.shops = db.shops.map(x => x.id === prev.id ? shop : x);
-  else db.shops.push(shop);
-  save();
+  writeShop(shop);
   $('#shopDialog').close();
-  render();
   toast(prev ? '更新しました' : `「${shop.name}」を追加しました`);
 });
 
 /* =========================================================
-   共有（リンク / JSON）
+   招待・バックアップ
    ========================================================= */
-function b64u(bytes) {
-  let s = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-function fromB64u(str) {
-  str = str.replace(/-/g, '+').replace(/_/g, '/');
-  while (str.length % 4) str += '=';
-  const bin = atob(str);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-async function encodeShare(obj) {
-  const bytes = new TextEncoder().encode(JSON.stringify(obj));
-  if ('CompressionStream' in window) {
-    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
-    return 'z' + b64u(new Uint8Array(await new Response(stream).arrayBuffer()));
+async function shareInvite() {
+  const url = inviteUrl();
+  const text = 'ふたりの行きたいお店リストに招待します。リンクを開いて Google でログインしてください。';
+  if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+    try { await navigator.share({ title: 'ふたりの行きたいお店', text, url }); return; } catch (e) { if (e.name === 'AbortError') return; }
   }
-  return 'j' + b64u(bytes);
-}
-async function decodeShare(payload) {
-  const mode = payload[0];
-  let bytes = fromB64u(payload.slice(1));
-  if (mode === 'z') {
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-    bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('招待リンクをコピーしました');
+  } catch {
+    $('#inviteUrl').select();
+    toast('リンクを選択しました。コピーして送ってください');
   }
-  return JSON.parse(new TextDecoder().decode(bytes));
 }
-function exportObj() {
-  return { version: 1, shops: db.shops, genres: db.genres, moods: db.moods, deleted: db.deleted };
-}
+
 async function askImport(data, sourceLabel) {
-  const incoming = normDb(data);
   const mode = await choose({
     title: `${sourceLabel}を読み込みますか？`,
-    message: `${incoming.shops.length}件のお店が含まれています。\n\n統合：今のリストに追加・更新します（同じお店は新しく編集された方を採用）\n置き換え：今のリストを消して、読み込んだ内容にします`,
+    message: `${data.shops.length}件のお店が含まれています。\n\n統合：今のリストに追加・更新します（同じお店は新しく編集された方を採用）\n置き換え：今のリストを消して、読み込んだ内容にします（相手の画面からも消えます）`,
     buttons: [
       { label: 'キャンセル', value: null },
       { label: '置き換える', value: 'replace' },
       { label: '統合する', value: 'merge', kind: 'primary' },
     ],
   });
-  if (!mode) return;
-  const before = db.shops.length;
-  db = mode === 'replace' ? incoming : mergeDb(db, incoming);
-  save();
-  render();
-  toast(mode === 'replace' ? `${db.shops.length}件に置き換えました` : `統合しました（${before}件 → ${db.shops.length}件）`);
-}
-async function checkShareHash() {
-  const m = location.hash.match(/^#share=([zj][A-Za-z0-9_-]+)$/);
-  if (!m) return;
-  history.replaceState(null, '', location.pathname + location.search);
+  if (!mode) return false;
   try {
-    await askImport(await decodeShare(m[1]), '共有されたリスト');
+    const n = await importData(data, mode);
+    toast(mode === 'replace' ? `${data.shops.length}件に置き換えました` : `${n}件を追加・更新しました`);
+    return true;
   } catch (e) {
-    console.warn(e);
-    toast('共有リンクを読み込めませんでした（リンクが途中で切れている可能性があります）');
+    writeErr(e);
+    return false;
   }
+}
+async function importLegacy() {
+  const legacy = loadLegacy();
+  if (!legacy.shops.length) return;
+  const ok = await choose({
+    title: 'この端末のデータを取り込みますか？',
+    message: `${legacy.shops.length}件のお店を、ふたりのリストに追加します（同じお店は新しく編集された方を採用）。`,
+    buttons: [{ label: 'キャンセル', value: null }, { label: '取り込む', value: true, kind: 'primary' }],
+  });
+  if (!ok) return;
+  try {
+    const n = await importData(legacy, 'merge');
+    lsSet(`futari-migrated-${session.spaceId}`, String(Date.now()));
+    renderSettings();
+    toast(`${n}件を取り込みました`);
+  } catch (e) { writeErr(e); }
 }
 
-$('#shareLink').addEventListener('click', async () => {
-  if (!db.shops.length) { toast('共有するお店がありません'); return; }
-  const url = `${location.origin === 'null' ? location.href.split('#')[0] : location.origin + location.pathname}#share=${await encodeShare(exportObj())}`;
-  if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
-    try { await navigator.share({ title: 'ふたりの行きたいお店', url }); return; } catch (e) { if (e.name === 'AbortError') return; }
-  }
-  try {
-    await navigator.clipboard.writeText(url);
-    toast(`共有リンクをコピーしました（${url.length.toLocaleString()}文字）`);
-  } catch {
-    await choose({ title: '共有リンク', message: url, buttons: [{ label: '閉じる', value: null }] });
-  }
-});
 $('#exportJson').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(exportObj(), null, 2)], { type: 'application/json' });
+  const data = { version: 2, exportedAt: new Date().toISOString(), shops: db.shops, genres: db.genres, moods: db.moods };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   const d = new Date();
   a.href = URL.createObjectURL(blob);
@@ -1244,8 +1555,10 @@ $('#importJson').addEventListener('change', async e => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
-  try { await askImport(JSON.parse(await file.text()), 'JSONファイル'); }
-  catch { toast('JSONファイルを読み込めませんでした'); }
+  let data;
+  try { data = normImport(JSON.parse(await file.text())); }
+  catch { toast('JSONファイルを読み込めませんでした'); return; }
+  await askImport(data, 'JSONファイル');
 });
 
 /* =========================================================
@@ -1254,35 +1567,34 @@ $('#importJson').addEventListener('change', async e => {
 $('#gmKeySave').addEventListener('click', () => {
   const v = $('#gmKey').value.trim();
   if (!v) { toast('APIキーを入力してください'); return; }
-  try { localStorage.setItem(GM_KEY, v); } catch {}
+  lsSet(GM_KEY, v);
   toast('保存しました。地図を切り替えるため再読み込みします');
   setTimeout(() => location.reload(), 900);
 });
 $('#gmKeyClear').addEventListener('click', () => {
-  try { localStorage.removeItem(GM_KEY); } catch {}
+  lsDel(GM_KEY);
   toast('APIキーを削除しました。再読み込みします');
   setTimeout(() => location.reload(), 900);
 });
 $('#wipe').addEventListener('click', async () => {
   const ok = await choose({
     title: 'すべてのお店を削除しますか？',
-    message: 'この端末に保存されたリストが空になります。元に戻せないので、必要なら先にJSONを書き出してください。',
+    message: 'ふたりのリストが空になり、相手の画面からも消えます。元に戻せないので、必要なら先にJSONを書き出してください。',
     buttons: [{ label: 'キャンセル', value: null }, { label: '削除する', value: true, kind: 'danger' }],
   });
   if (!ok) return;
-  const now = Date.now();
-  db.shops.forEach(s => { db.deleted[s.id] = now; });
-  db.shops = [];
-  save();
-  render();
-  toast('すべて削除しました');
+  try {
+    await commitBatch([], db.shops.map(s => s.id));
+    toast('すべて削除しました');
+  } catch (e) { writeErr(e); }
 });
 function addMaster(kind, input) {
   const v = input.value.trim();
   if (!v) return;
-  if (!db[kind].includes(v)) db[kind].push(v);
   input.value = '';
-  save();
+  if (db[kind].includes(v)) return;
+  db[kind] = [...db[kind], v];
+  writeMasters();
 }
 async function removeMaster(kind, v) {
   const used = db.shops.filter(s => s[kind].includes(v));
@@ -1301,12 +1613,12 @@ async function removeMaster(kind, v) {
     alsoShops = r === 'all';
   }
   db[kind] = db[kind].filter(x => x !== v);
+  writeMasters();
   if (alsoShops) {
     const now = Date.now();
-    db.shops = db.shops.map(s => s[kind].includes(v) ? { ...s, [kind]: s[kind].filter(x => x !== v), updatedAt: now } : s);
     ui[kind].delete(v);
+    commitBatch(used.map(s => ({ ...s, [kind]: s[kind].filter(x => x !== v), updatedAt: now }))).catch(writeErr);
   }
-  save();
   render();
 }
 
@@ -1315,6 +1627,7 @@ async function removeMaster(kind, v) {
    ========================================================= */
 function addSamples() {
   const now = Date.now();
+  const me = session.user.uid;
   const samples = [
     { name: '（サンプル）炭火焼鳥 とりまる', area: '恵比寿', genres: ['焼き鳥', '居酒屋'], moods: ['カウンター', 'カジュアル'], memo: '金曜の夜に行きたい。予約必須らしい', lat: 35.6467, lng: 139.7101 },
     { name: '（サンプル）Trattoria Sole', area: '代官山', genres: ['イタリアン'], moods: ['デート向き', 'テラス席', 'おしゃれ'], memo: '記念日の候補', lat: 35.6487, lng: 139.7031 },
@@ -1322,10 +1635,9 @@ function addSamples() {
     { name: '（サンプル）麺処 しずく', area: '新宿', genres: ['ラーメン'], moods: ['カジュアル', '一人でも'], lat: 35.6909, lng: 139.7003 },
     { name: '（サンプル）鮨 こはく', area: '銀座', genres: ['寿司', '和食'], moods: ['記念日', 'カウンター', '落ち着いた'], memo: 'ランチなら手が届きそう' },
   ];
-  samples.forEach((s, i) => db.shops.push(normShop({ ...s, id: uid(), createdAt: now - i * 1000, updatedAt: now })));
-  save();
-  render();
-  toast('サンプルを追加しました（不要になったら削除してください）');
+  commitBatch(samples.map((s, i) => normShop({ ...s, id: uid(), addedBy: me, createdAt: now - i * 1000, updatedAt: now })))
+    .then(() => toast('サンプルを追加しました（不要になったら削除してください）'))
+    .catch(writeErr);
 }
 
 /* =========================================================
@@ -1356,7 +1668,7 @@ $('#q').addEventListener('input', e => {
 });
 $('#sort').addEventListener('change', e => {
   ui.sort = e.target.value;
-  try { localStorage.setItem('futari-sort', ui.sort); } catch {}
+  lsSet('futari-sort', ui.sort);
   renderList();
 });
 $('#statusSeg').addEventListener('click', e => {
@@ -1367,8 +1679,8 @@ $('#matchSeg').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   ui.match = b.dataset.match; render();
 });
-$('#mGenreNew').addEventListener('keydown', e => { if (e.key === 'Enter') { addMaster('genres', e.target); renderSettings(); } });
-$('#mMoodNew').addEventListener('keydown', e => { if (e.key === 'Enter') { addMaster('moods', e.target); renderSettings(); } });
+$('#mGenreNew').addEventListener('keydown', e => { if (e.key === 'Enter') addMaster('genres', e.target); });
+$('#mMoodNew').addEventListener('keydown', e => { if (e.key === 'Enter') addMaster('moods', e.target); });
 for (const [id, kind] of [['#formGenreNew', 'genres'], ['#formMoodNew', 'moods']]) {
   $(id).addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
@@ -1394,16 +1706,20 @@ document.addEventListener('click', async e => {
   if (!a) return;
   const id = a.dataset.id;
   switch (a.dataset.action) {
+    case 'login': login(); break;
+    case 'create-space': createSpace(); break;
+    case 'logout': logout(); break;
+    case 'logout-now': fb.signOut(fb.auth); break;
+    case 'reload': location.reload(); break;
+    case 'share-invite': shareInvite(); break;
+    case 'import-legacy': importLegacy(); break;
     case 'add': openShopForm(); break;
     case 'sample': addSamples(); break;
     case 'clear-filters': clearFilters(); break;
     case 'close-shop': $('#shopDialog').close(); break;
     case 'toggle-visited': {
       const s = db.shops.find(x => x.id === id);
-      if (!s) break;
-      s.visited = !s.visited;
-      s.updatedAt = Date.now();
-      save(); render();
+      if (s) writeShop({ ...s, visited: !s.visited, updatedAt: Date.now() });
       break;
     }
     case 'show-on-map': switchTab('map', id); break;
@@ -1412,12 +1728,11 @@ document.addEventListener('click', async e => {
       if (!s) break;
       const ok = await choose({
         title: `「${s.name}」を削除しますか？`,
+        message: '相手の画面からも消えます。',
         buttons: [{ label: 'キャンセル', value: null }, { label: '削除する', value: true, kind: 'danger' }],
       });
       if (!ok) break;
-      db.shops = db.shops.filter(x => x.id !== id);
-      db.deleted[id] = Date.now();
-      save(); render();
+      removeShop(id);
       toast('削除しました');
       break;
     }
@@ -1448,19 +1763,23 @@ document.addEventListener('click', async e => {
     case 'add-master': {
       const kind = a.dataset.kind;
       addMaster(kind, kind === 'genres' ? $('#mGenreNew') : $('#mMoodNew'));
-      renderSettings();
       break;
     }
     case 'remove-master': removeMaster(a.dataset.kind, a.dataset.val); break;
   }
 });
 
-// 別タブで編集されたら反映
-window.addEventListener('storage', e => { if (e.key === STORE_KEY) { db = load(); render(); } });
 window.addEventListener('resize', () => { if (ui.tab === 'map') MapView.resize(); });
+window.addEventListener('online', render);
+window.addEventListener('offline', render);
+// ログイン後に招待リンクを開き直した場合
+window.addEventListener('hashchange', () => {
+  if (!/^#join=/.test(location.hash)) return;
+  capturePendingJoin();
+  if (fb && session.user) onAuth(session.user);
+});
 
-render();
-checkShareHash();
+boot();
 </script>
 </body>
 </html>

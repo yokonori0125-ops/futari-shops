@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMember(spaceId) {
+      return signedIn() &&
+        request.auth.uid in get(/databases/$(database)/documents/spaces/$(spaceId)).data.members;
+    }
+
+    match /spaces/{spaceId} {
+      // 部屋の中身はメンバーだけが読める（部屋の一覧取得は禁止）
+      allow get: if signedIn() && request.auth.uid in resource.data.members;
+      // 作成時のメンバーは自分1人だけ
+      allow create: if signedIn() && request.resource.data.members == [request.auth.uid];
+      allow update: if signedIn() && (
+        // メンバーはメンバー構成以外を変更できる
+        (request.auth.uid in resource.data.members
+          && request.resource.data.members == resource.data.members)
+        // 招待された人は、2人目として自分を追加することだけができる
+        || (!(request.auth.uid in resource.data.members)
+          && resource.data.members.size() < 2
+          && request.resource.data.members == resource.data.members.concat([request.auth.uid])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']))
+      );
+      allow delete: if false;
+
+      match /shops/{shopId} {
+        allow read, write: if isMember(spaceId);
+      }
+    }
+
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+  }
+}
