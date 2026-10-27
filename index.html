@@ -320,6 +320,38 @@
   @media (max-width: 640px) { .choose-btns { flex-direction: column-reverse; } .choose-btns .btn { width: 100%; } }
   .btn.danger-fill { background: var(--danger); border-color: var(--danger); color: #fff; }
 
+  /* ---------- 選択して削除 ---------- */
+  .list-head .tools { display: flex; gap: 8px; align-items: center; }
+  .card.selectable { cursor: pointer; user-select: none; position: relative; padding-right: 56px; }
+  .card.selectable:hover { border-color: var(--navy-2); }
+  .card.selected { border: 2px solid var(--navy); background: var(--navy-soft); padding: 15px 55px 7px 15px; }
+  .check-ind {
+    position: absolute; top: 14px; right: 14px; width: 28px; height: 28px; border-radius: 8px;
+    border: 2px solid var(--border); background: var(--surface); display: grid; place-items: center;
+  }
+  .card.selected .check-ind { background: var(--navy); border-color: var(--navy); }
+  .card.selected .check-ind::after { content: ""; width: 7px; height: 13px; border: solid #fff; border-width: 0 3px 3px 0; transform: rotate(45deg) translate(-1px, -1px); }
+  .select-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; background: var(--navy); color: #fff;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 -6px 20px rgba(27, 42, 78, .2);
+  }
+  .select-bar .inner { max-width: 1080px; margin: 0 auto; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px 8px; }
+  .select-bar .cnt { font-weight: 800; font-size: 15px; text-align: center; white-space: nowrap; }
+  .select-bar .btn { min-height: 44px; white-space: nowrap; }
+  .select-bar .del { grid-column: 1 / -1; min-height: 50px; font-size: 16px; }
+  .select-bar .del:disabled { opacity: .45; }
+  @media (min-width: 900px) {
+    .select-bar .inner { display: flex; }
+    .select-bar .cnt { flex: 1; text-align: left; order: -1; }
+    .select-bar .del { min-height: 44px; font-size: 15px; }
+  }
+  .select-bar .btn.ghost { color: #fff; }
+  .select-bar .btn.ghost:hover { background: rgba(255, 255, 255, .12); }
+  @media (max-width: 899px) { body.selecting .tabbar { display: none; } }
+  body.selecting #app { padding-bottom: calc(140px + env(safe-area-inset-bottom)); }
+  body.selecting #toast { bottom: calc(136px + env(safe-area-inset-bottom)); }
+  @media (min-width: 900px) { body.selecting #toast { bottom: 84px; } }
+
   /* ---------- toast ---------- */
   #toast {
     position: fixed; left: 50%; bottom: calc(var(--bar-h) + 16px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(10px);
@@ -379,6 +411,14 @@
   <button class="tab-add" id="addBtn" aria-label="お店を追加"><span class="plus"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">お店を追加</span></span></button>
   <button role="tab" data-tab="map" aria-selected="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><span>マップ</span></button>
 </nav>
+<div class="select-bar" id="selectBar" hidden role="region" aria-label="選択中の操作">
+  <div class="inner">
+    <button class="btn sm ghost" data-action="select-cancel">キャンセル</button>
+    <span class="cnt" id="selectCount" aria-live="polite">0件を選択中</span>
+    <button class="btn sm ghost" data-action="select-all" id="selectAll">すべて選択</button>
+    <button class="btn danger-fill del" data-action="delete-selected" id="deleteSelected" disabled>削除</button>
+  </div>
+</div>
 
 <main class="wrap">
   <!-- 検索・絞り込み（一覧とマップで共通） -->
@@ -418,6 +458,8 @@
   <section id="tab-list">
     <div class="list-head">
       <span id="resultCount" class="muted small"></span>
+      <div class="tools">
+      <button class="btn sm" id="selectToggle" data-action="select-mode">選択</button>
       <select id="sort" aria-label="並び替え">
         <option value="new">追加が新しい順</option>
         <option value="old">追加が古い順</option>
@@ -425,6 +467,7 @@
         <option value="area">エリア順</option>
         <option value="want">行きたいを優先</option>
       </select>
+      </div>
     </div>
     <div id="cards" class="cards"></div>
   </section>
@@ -757,6 +800,7 @@ let db = { shops: [], genres: [...DEFAULT_GENRES], moods: [...DEFAULT_MOODS] };
 const session = { user: null, spaceId: null, space: null, loaded: false, unsubs: [], infoSynced: false, requests: [], requestsListening: false, badLink: false };
 const ui = {
   tab: 'list', q: '', status: 'all', match: 'any', sort: lsGet('futari-sort') || 'new',
+  selecting: false, selected: new Set(),
   areas: new Set(), genres: new Set(), moods: new Set(),
   filtersOpen: false,
 };
@@ -848,6 +892,9 @@ function stopListening() {
   session.infoSynced = false;
   session.requests = [];
   session.requestsListening = false;
+  ui.selecting = false;
+  ui.selected.clear();
+  document.body.classList.remove('selecting');
   db = { shops: [], genres: [...DEFAULT_GENRES], moods: [...DEFAULT_MOODS] };
 }
 
@@ -1230,6 +1277,7 @@ function render() {
 
   if (ui.tab !== 'settings') renderFilters();
   if (ui.tab === 'list') renderList();
+  else { document.body.classList.remove('selecting'); $('#selectBar').hidden = true; }
   if (ui.tab === 'map') renderMap();
   if (ui.tab === 'settings') renderSettings();
 }
@@ -1276,6 +1324,16 @@ function linksHTML(s) {
   if (s.insta) out.push(a(s.insta, 'Instagram'));
   return out.join('');
 }
+// 選択モードのカード：リンクやボタンを出さず、カード全体で選択を切り替える
+function selectCardHTML(s) {
+  const on = ui.selected.has(s.id);
+  const tags = [...s.genres, ...s.moods].map((t, i) => `<span class="tag ${i < s.genres.length ? 'genre' : 'mood'}">${esc(t)}</span>`).join('');
+  return `<article class="card selectable${on ? ' selected' : ''}" data-select-id="${esc(s.id)}" role="checkbox" aria-checked="${on}" tabindex="0">
+    <span class="check-ind" aria-hidden="true"></span>
+    <div><h3>${esc(s.name)}</h3><div class="area">${esc(s.area || NO_AREA)}${s.visited ? '・行った' : ''}</div></div>
+    ${tags ? `<div class="tags">${tags}</div>` : ''}
+  </article>`;
+}
 function cardHTML(s) {
   const tags = [
     ...s.genres.map(g => `<span class="tag genre">${esc(g)}</span>`),
@@ -1318,8 +1376,44 @@ function renderList() {
       <div class="btns"><button class="btn" data-action="clear-filters">条件をクリア</button></div>
     </div>`;
   } else {
-    el.innerHTML = list.map(cardHTML).join('');
+    el.innerHTML = list.map(ui.selecting ? selectCardHTML : cardHTML).join('');
   }
+  renderSelectBar(list);
+}
+function renderSelectBar(list = sorted(filtered())) {
+  // 相手が削除したお店や、絞り込みで見えなくなったお店は選択から外す
+  const visible = new Set(list.map(s => s.id));
+  for (const id of ui.selected) if (!visible.has(id)) ui.selected.delete(id);
+  const on = ui.selecting && ui.tab === 'list';
+  document.body.classList.toggle('selecting', on);
+  $('#selectBar').hidden = !on;
+  $('#selectToggle').hidden = on || !db.shops.length;
+  const n = ui.selected.size;
+  $('#selectCount').textContent = `${n}件を選択中`;
+  $('#deleteSelected').disabled = !n;
+  $('#deleteSelected').textContent = n ? `${n}件を削除` : '削除';
+  $('#selectAll').textContent = list.length && n === list.length ? '選択を解除' : 'すべて選択';
+}
+function setSelecting(on) {
+  ui.selecting = on;
+  ui.selected.clear();
+  renderList();
+}
+async function deleteSelected() {
+  const shops = db.shops.filter(s => ui.selected.has(s.id));
+  if (!shops.length) return;
+  const names = shops.slice(0, 5).map(s => `・${s.name}`).join('\n') + (shops.length > 5 ? `\nほか${shops.length - 5}件` : '');
+  const ok = await choose({
+    title: `${shops.length}件のお店を削除しますか？`,
+    message: `${names}\n\n相手の画面からも消えます。元に戻せません。`,
+    buttons: [{ label: 'キャンセル', value: null }, { label: `${shops.length}件を削除`, value: true, kind: 'danger-fill' }],
+  });
+  if (!ok) return;
+  try {
+    await commitBatch([], shops.map(s => s.id));
+    setSelecting(false);
+    toast(`${shops.length}件を削除しました`);
+  } catch (e) { writeErr(e); }
 }
 
 function renderSettings() {
@@ -1855,6 +1949,7 @@ function addSamples() {
    ========================================================= */
 function switchTab(tab, focusId) {
   ui.tab = tab;
+  if (tab !== 'list') { ui.selecting = false; ui.selected.clear(); }
   if (tab === 'map' && window.innerWidth <= 760) ui.filtersOpen = false; // スマホでは地図を広く
   render();
   if (tab === 'map' && focusId) renderMap(focusId);
@@ -1908,6 +2003,8 @@ document.addEventListener('click', async e => {
     render();
     return;
   }
+  const sc = e.target.closest('[data-select-id]');
+  if (sc) { toggleSelect(sc.dataset.selectId); return; }
   const tb = e.target.closest('[data-tab]');
   if (tb) { switchTab(tb.dataset.tab); return; }
   const ed = e.target.closest('[data-edit]');
@@ -1923,6 +2020,16 @@ document.addEventListener('click', async e => {
     case 'logout-now': signOutAndClear(); break;
     case 'reload': location.reload(); break;
     case 'share-invite': shareInvite(); break;
+    case 'select-mode': setSelecting(true); break;
+    case 'select-cancel': setSelecting(false); break;
+    case 'select-all': {
+      const list = sorted(filtered());
+      if (ui.selected.size === list.length) ui.selected.clear();
+      else list.forEach(s => ui.selected.add(s.id));
+      renderList();
+      break;
+    }
+    case 'delete-selected': deleteSelected(); break;
     case 'regen-invite': regenInvite(); break;
     case 'approve-req': approveRequest(id); break;
     case 'reject-req': rejectRequest(id); break;
@@ -1987,6 +2094,21 @@ document.addEventListener('click', async e => {
 });
 
 window.addEventListener('resize', () => { if (ui.tab === 'map') MapView.resize(); });
+function toggleSelect(id) {
+  ui.selected.has(id) ? ui.selected.delete(id) : ui.selected.add(id);
+  const card = document.querySelector(`[data-select-id="${CSS.escape(id)}"]`);
+  if (card) {
+    const on = ui.selected.has(id);
+    card.classList.toggle('selected', on);
+    card.setAttribute('aria-checked', String(on));
+  }
+  renderSelectBar();
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && ui.selecting && !document.querySelector('dialog[open]')) { setSelecting(false); return; }
+  const sc = e.target.closest?.('[data-select-id]');
+  if (sc && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); toggleSelect(sc.dataset.selectId); }
+});
 window.addEventListener('online', render);
 window.addEventListener('offline', render);
 // ログイン後に招待リンクを開き直した場合
