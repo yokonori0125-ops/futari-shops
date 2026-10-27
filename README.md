@@ -26,6 +26,7 @@ LINE のアプリ内ブラウザでは Google ログインができないため�
 
 アクセス制御は Firestore のセキュリティルール（[`firestore.rules`](firestore.rules)）で行っています。
 
+- **ルールに登録した2つの Google アカウント以外は、ログインしても一切読み書きできない**（メールアドレスの許可リスト）
 - リスト（部屋）の中身を読み書きできるのはメンバーだけ。部屋の一覧取得は禁止
 - メンバー以外ができるのは「2人目として自分を追加する」ことだけ。2人そろうと誰も参加できない
 - メンバーの削除・入れ替え、部屋の削除は不可
@@ -37,7 +38,10 @@ LINE のアプリ内ブラウザでは Google ログインができないため�
 1. Firebase プロジェクトを作成し、ウェブアプリを登録して `firebaseConfig` を `index.html` に貼る
 2. Authentication → Sign-in method で **Google** を有効化し、承認済みドメインに `yokonori0125-ops.github.io` を追加
 3. Firestore Database を作成（本番環境モード）
-4. Firestore → ルール に `firestore.rules` の内容を貼り付けて公開
+4. Firestore → ルール に `firestore.rules` の内容を貼り付け、`allowedEmails()` の2つのアドレスを実際の Google アカウントに書き換えて公開
+   （実際のアドレスはこの公開リポジトリには書かないこと）
+5. （推奨）Google Cloud Console → 認証情報 で、Firebase の API キーに「ウェブサイト」の制限
+   （`yokonori0125-ops.github.io/*` と `gohan-sagasooo.firebaseapp.com/*`）を設定
 
 ## Google Maps API キー（任意）
 

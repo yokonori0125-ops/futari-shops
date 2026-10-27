@@ -7,7 +7,7 @@
 <meta name="description" content="ふたりで行きたいお店をリスト化して共有するページ">
 <meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%23d2553a'/><text x='50' y='67' font-size='48' text-anchor='middle' fill='white' font-family='sans-serif'>食</text></svg>">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
 <style>
   :root {
     --bg: #faf7f2;
@@ -544,7 +544,7 @@
 <dialog id="chooseDialog"></dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script type="module">
 /* =========================================================
    Firebase 設定
@@ -818,7 +818,8 @@ async function onAuth(user) {
     enterSpace(spaceId);
   } catch (e) {
     console.error(e);
-    showGate('error', { error: `読み込みに失敗しました（${errText(e)}）。通信状況を確認して再読み込みしてください。` });
+    if (e?.code === 'permission-denied') showGate('denied');
+    else showGate('error', { error: `読み込みに失敗しました（${errText(e)}）。通信状況を確認して再読み込みしてください。` });
   }
 }
 
@@ -904,7 +905,18 @@ async function logout() {
     message: 'リストのデータは消えません。もう一度ログインすれば元に戻ります。',
     buttons: [{ label: 'キャンセル', value: null }, { label: 'ログアウト', value: true, kind: 'primary' }],
   });
-  if (ok) await fb.signOut(fb.auth);
+  if (ok) await signOutAndClear();
+}
+// ログアウト時は、端末に一時保存したリストの内容も消す
+async function signOutAndClear() {
+  showGate('loading', { text: 'ログアウトしています…' });
+  stopListening();
+  try { await fb.signOut(fb.auth); } catch (e) { console.warn(e); }
+  try {
+    await fb.terminate(fb.fs);
+    await fb.clearIndexedDbPersistence(fb.fs);
+  } catch (e) { console.warn('cache clear failed', e); }
+  location.reload();
 }
 
 // 書き込み（画面は onSnapshot で自動的に更新される）
@@ -977,6 +989,11 @@ function showGate(state, opts = {}) {
       <button class="btn primary big" data-action="create-space">新しいリストを作る</button>
       <p class="small">相手がすでにリストを作っている場合は、ここで作らずに、相手から届いた<b>招待リンク</b>を開いてください。</p>
       <button class="btn ghost sm" data-action="logout-now">別のアカウントでログイン</button>`;
+  } else if (state === 'denied') {
+    html = `
+      <div class="gate-err">このアカウント（${esc(session.user?.email || '')}）は、このリストの利用を許可されていません。</div>
+      <p class="small">許可されたアカウントでログインし直してください。管理者の方は、Firestore のルールに使用する2人のメールアドレスが正しく書かれ、公開されているか確認してください。</p>
+      <button class="btn primary big" data-action="logout-now">別のアカウントでログイン</button>`;
   } else {
     html = `${err}<button class="btn big" data-action="reload">再読み込み</button>`;
   }
@@ -1710,7 +1727,7 @@ document.addEventListener('click', async e => {
     case 'login': login(); break;
     case 'create-space': createSpace(); break;
     case 'logout': logout(); break;
-    case 'logout-now': fb.signOut(fb.auth); break;
+    case 'logout-now': signOutAndClear(); break;
     case 'reload': location.reload(); break;
     case 'share-invite': shareInvite(); break;
     case 'import-legacy': importLegacy(); break;
