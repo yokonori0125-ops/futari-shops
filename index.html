@@ -291,6 +291,7 @@
   .img-preview:empty { display: none; }
   .img-preview img { width: 120px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; background: var(--surface-2); flex-shrink: 0; }
   .img-preview .grow { flex: 1; display: grid; gap: 6px; justify-items: start; }
+  .img-preview .ok-note { color: var(--ok-ink); }
   /* 食べログの評価 */
   .rating { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); margin-top: 2px; }
   .rating .stars {
@@ -723,6 +724,7 @@
       <div class="field">
         <span class="label">ジャンル</span>
         <div class="chips" id="formGenres"></div>
+        <div class="help ok" id="genreAutoNote" hidden></div>
         <div class="add-row"><input type="text" id="formGenreNew" placeholder="ほかのジャンルを追加" enterkeyhint="done"><button type="button" class="btn" data-action="form-add" data-kind="genres">追加</button></div>
       </div>
       <div class="field">
@@ -1865,6 +1867,7 @@ async function renderMap(focusId) {
 let editingId = null;
 const form = {
   image: '', imageFrom: '', imageState: '', rating: null, ratingFrom: '', ratingAt: 0,
+  autoGenres: new Set(), autoCats: [],  // 食べログのカテゴリから自動で選んだジャンル
   genres: new Set(),
   moods: new Set(),
   posAuto: false,   // 位置がURLから自動入力されたかどうか
@@ -1901,6 +1904,9 @@ function openShopForm(id = null) {
   form.rating = s?.rating ?? null;
   form.ratingFrom = s?.ratingFrom || '';
   form.ratingAt = s?.ratingAt || 0;
+  form.autoGenres = new Set();
+  form.autoCats = [];
+  $('#genreAutoNote').hidden = true;
   form.imageState = '';
   renderImagePreview();
   // 食べログのリンクはあるのに画像がまだ無いお店は、編集を開いたときに取得する
@@ -1989,7 +1995,52 @@ function infoFromHtml(html) {
     if (rating) break;
   }
   if (!rating) rating = parseRating(doc.querySelector(RATING_SELECTOR)?.textContent);
-  return { image: doc.querySelector('meta[property="og:image"]')?.content || '', rating };
+  const title = doc.querySelector('meta[property="og:title"]')?.content || doc.title || '';
+  let cuisine = '';
+  for (const sc of doc.querySelectorAll('script[type="application/ld+json"]')) {
+    try {
+      const j = JSON.parse(sc.textContent);
+      for (const o of [].concat(j, j?.['@graph'] || [])) if (o?.servesCuisine) { cuisine = [].concat(o.servesCuisine).join('、'); break; }
+    } catch {}
+    if (cuisine) break;
+  }
+  return { image: doc.querySelector('meta[property="og:image"]')?.content || '', rating, title, cuisine };
+}
+// 食べログのページタイトル「店名 (最寄駅/ジャンル1、ジャンル2) - 食べログ」から店名とカテゴリを取り出す
+function parseTabelogTitle(title) {
+  const m = String(title || '').match(/^(.*?)\s*[(（]([^()（）]*)[)）]\s*[-－–―]\s*食べログ/);
+  if (!m) return { name: '', genres: [] };
+  const inner = m[2];
+  const slash = Math.max(inner.lastIndexOf('/'), inner.lastIndexOf('／'));
+  return { name: m[1].trim(), genres: splitCategories(slash >= 0 ? inner.slice(slash + 1) : '') };
+}
+const splitCategories = str => uniq(String(str || '').split(/[、,，]/));
+// 食べログのカテゴリを、このアプリのジャンルにそろえる（対応が無ければカテゴリ名のまま使う）
+const GENRE_ALIASES = {
+  日本料理: '和食', 懐石料理: '和食', 会席料理: '和食', '懐石・会席料理': '和食', '割烹・小料理': '和食', 小料理: '和食', 割烹: '和食', '定食・食堂': '和食', 郷土料理: '和食',
+  回転寿司: '寿司', すし: '寿司', 鮨: '寿司',
+  ホルモン: '焼肉', ジンギスカン: '焼肉',
+  焼鳥: '焼き鳥', やきとり: '焼き鳥',
+  つけ麺: 'ラーメン', 担々麺: 'ラーメン', '油そば・まぜそば': 'ラーメン', 'ラーメン・つけ麺': 'ラーメン',
+  そば: 'そば・うどん', うどん: 'そば・うどん', 立ち食いそば: 'そば・うどん', 'うどん・そば': 'そば・うどん',
+  ピザ: 'イタリアン', パスタ: 'イタリアン', イタリア料理: 'イタリアン',
+  ビストロ: 'フレンチ', フランス料理: 'フレンチ',
+  中華料理: '中華', 四川料理: '中華', 広東料理: '中華', 上海料理: '中華', 北京料理: '中華', 台湾料理: '中華', '飲茶・点心': '中華', 餃子: '中華', 小籠包: '中華',
+  冷麺: '韓国料理',
+  タイ料理: 'エスニック', ベトナム料理: 'エスニック', インド料理: 'エスニック', インドネシア料理: 'エスニック', ネパール料理: 'エスニック', 'アジア・エスニック': 'エスニック', 東南アジア料理: 'エスニック',
+  インドカレー: 'カレー', スープカレー: 'カレー', 欧風カレー: 'カレー', カレーライス: 'カレー',
+  喫茶店: 'カフェ', コーヒー専門店: 'カフェ', 紅茶専門店: 'カフェ', 'カフェ・喫茶': 'カフェ',
+  ケーキ: 'スイーツ', 和菓子: 'スイーツ', 洋菓子: 'スイーツ', 甘味処: 'スイーツ', パフェ: 'スイーツ', アイスクリーム: 'スイーツ', ジェラート: 'スイーツ', かき氷: 'スイーツ', チョコレート: 'スイーツ', ドーナツ: 'スイーツ', パンケーキ: 'スイーツ', 'クレープ・ガレット': 'スイーツ', 大福: 'スイーツ', たい焼き: 'スイーツ',
+  ベーカリー: 'パン', サンドイッチ: 'パン', ベーグル: 'パン',
+  ワインバー: 'バー', ダイニングバー: 'バー', ビアバー: 'バー', 日本酒バー: 'バー', ビアホール: 'バー', パブ: 'バー',
+  焼酎バー: 'バー', '立ち飲み': '居酒屋', 'もつ焼き': '居酒屋', 'おでん': '居酒屋',
+};
+function mapTabelogGenres(cats) {
+  return uniq(cats.map(c => {
+    if (db.genres.includes(c)) return c;              // 同じ名前のジャンルがあればそれ
+    const a = GENRE_ALIASES[c];
+    return a && db.genres.includes(a) ? a : c;        // 近いジャンルがあればそれ、無ければカテゴリ名のまま
+  }));
 }
 const infoCache = new Map();
 // 戻り値: { ok: ページを読めたか, image, rating }
@@ -2000,7 +2051,7 @@ async function fetchTabelogInfo(pageUrl) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
   };
-  let ok = false, image = '', rating = null;
+  let ok = false, image = '', rating = null, title = '', cuisine = '';
   try {
     // 1) Microlink：リンクプレビュー用の画像と、点数の表示部分を取得
     const q = new URLSearchParams({ url: pageUrl, 'data.rating.selector': RATING_SELECTOR, 'data.rating.attr': 'text' });
@@ -2009,9 +2060,10 @@ async function fetchTabelogInfo(pageUrl) {
       ok = true;
       image = j.data?.image?.url || '';
       rating = parseRating(j.data?.rating);
+      title = j.data?.title || '';
     }
   } catch (e) { console.warn('microlink failed', e); }
-  if (!ok || !rating) {
+  if (!ok || !rating || !parseTabelogTitle(title).genres.length) {
     try {
       // 2) 予備：ページのHTMLを取得して読む
       const j = await tryJson(`https://api.allorigins.win/get?url=${encodeURIComponent(pageUrl)}`);
@@ -2020,10 +2072,13 @@ async function fetchTabelogInfo(pageUrl) {
         ok = true;
         image = image || info.image;
         rating = rating || info.rating;
+        if (!parseTabelogTitle(title).genres.length) title = info.title || title;
+        cuisine = info.cuisine;
       }
     } catch (e) { console.warn('allorigins failed', e); }
   }
-  const res = { ok, image: safeUrl(image), rating };
+  const t = parseTabelogTitle(title);
+  const res = { ok, image: safeUrl(image), rating, name: t.name, genres: t.genres.length ? t.genres : splitCategories(cuisine) };
   if (ok) infoCache.set(pageUrl, res);
   return res;
 }
@@ -2032,22 +2087,43 @@ const ratingStale = s => s.ratingFrom !== tabelogTop(s.tabelog) || !s.ratingAt |
 function renderImagePreview() {
   const el = $('#imgPreview');
   const rating = form.rating != null ? `<span class="rating"><span class="stars" style="--p:${(form.rating / 5 * 100).toFixed(1)}%" aria-hidden="true">★★★★★</span><b>${form.rating.toFixed(2)}</b><span class="src">食べログ</span></span>` : '';
+  const autoNote = form.autoGenres.size ? `<span class="ok-note">ジャンルに「${[...form.autoGenres].map(esc).join('」「')}」を自動で選びました（上のジャンル欄で変更できます）</span>` : '';
   if (form.imageState === 'loading') {
-    el.innerHTML = '<span>食べログからお店の画像と評価を取得しています…</span>';
+    el.innerHTML = '<span>食べログからお店の画像・評価・カテゴリを取得しています…</span>';
   } else if (form.image) {
-    el.innerHTML = `<img src="${esc(form.image)}" alt="" referrerpolicy="no-referrer"><div class="grow">${rating}<span>お店の画像を一覧に表示します。</span><button type="button" class="btn sm" data-action="remove-image">画像を表示しない</button></div>`;
+    el.innerHTML = `<img src="${esc(form.image)}" alt="" referrerpolicy="no-referrer"><div class="grow">${rating}${autoNote}<span>お店の画像を一覧に表示します。</span><button type="button" class="btn sm" data-action="remove-image">画像を表示しない</button></div>`;
   } else if (form.imageState === 'failed') {
     el.innerHTML = `<span>食べログの情報を取得できませんでした。</span><button type="button" class="btn sm" data-action="refetch-image">もう一度試す</button>`;
-  } else if (rating || form.ratingFrom) {
-    el.innerHTML = `<div class="grow">${rating || '<span>食べログの評価はまだありません。</span>'}</div>`;
+  } else if (rating || form.ratingFrom || autoNote) {
+    el.innerHTML = `<div class="grow">${rating || '<span>食べログの評価はまだありません。</span>'}${autoNote}</div>`;
   } else {
     el.innerHTML = '';
   }
 }
 let imgTimer;
-async function fetchFormImage() {
+// 食べログのリンクを消したときは、そのリンクから取ったもの（画像・評価・自動で選んだジャンル）も外す
+function clearTabelogForm() {
+  for (const g of form.autoGenres) form.genres.delete(g);
+  Object.assign(form, { image: '', imageFrom: '', rating: null, ratingFrom: '', ratingAt: 0, imageState: '', autoGenres: new Set(), autoCats: [] });
+  $('#genreAutoNote').hidden = true;
+  renderFormChips();
+  renderImagePreview();
+}
+// 食べログのカテゴリをジャンルに反映（前のリンクで自動選択した分は外して入れ替える。手動で選んだジャンルはそのまま）
+function applyTabelogGenres(cats) {
+  const picks = mapTabelogGenres(cats);
+  for (const g of form.autoGenres) form.genres.delete(g);
+  picks.forEach(g => form.genres.add(g));
+  form.autoGenres = new Set(picks);
+  form.autoCats = cats;
+  renderFormChips();
+  const note = $('#genreAutoNote');
+  note.hidden = !picks.length;
+  note.textContent = picks.length ? `食べログのカテゴリ（${cats.join('、')}）から「${picks.join('」「')}」を選びました。タップで変更できます。` : '';
+}
+async function fetchFormImage({ applyGenres = false } = {}) {
   const top = tabelogTop($('#fTabelog').value);
-  if (!top) { Object.assign(form, { image: '', imageFrom: '', rating: null, ratingFrom: '', ratingAt: 0, imageState: '' }); renderImagePreview(); return; }
+  if (!top) { clearTabelogForm(); return; }
   const imageRemoved = form.imageFrom === top && !form.image; // 「画像を表示しない」を選んでいる
   form.imageState = 'loading';
   renderImagePreview();
@@ -2055,6 +2131,9 @@ async function fetchFormImage() {
   if (tabelogTop($('#fTabelog').value) !== top) return; // 取得中にリンクが変わった
   if (info.ok) {
     if (!imageRemoved) { form.image = info.image; form.imageFrom = top; }
+    // カテゴリはリンクを貼った・変えたときだけ反映（編集を開いたときの再取得では、手動で直したタグを変えない）
+    if (applyGenres && info.genres.length) applyTabelogGenres(info.genres);
+    if (applyGenres && info.name && !$('#fName').value.trim()) { $('#fName').value = info.name; syncGeoQuery(); }
     Object.assign(form, { rating: info.rating, ratingFrom: top, ratingAt: Date.now() });
   }
   form.imageState = info.ok ? '' : 'failed';
@@ -2063,9 +2142,9 @@ async function fetchFormImage() {
 $('#fTabelog').addEventListener('input', () => {
   clearTimeout(imgTimer);
   const top = tabelogTop($('#fTabelog').value);
-  if (!top) { Object.assign(form, { image: '', imageFrom: '', rating: null, ratingFrom: '', ratingAt: 0, imageState: '' }); renderImagePreview(); return; }
+  if (!top) { clearTabelogForm(); return; }
   if (top === form.imageFrom && top === form.ratingFrom) return;
-  imgTimer = setTimeout(fetchFormImage, 500);
+  imgTimer = setTimeout(() => fetchFormImage({ applyGenres: true }), 500);
 });
 // 食べログのリンクがあるのに画像・評価が未取得（または1週間以上前）のお店を、裏で1件ずつ更新する（相手の画面にも反映）
 const imageTried = new Set();
@@ -2157,6 +2236,9 @@ $('#shopForm').addEventListener('submit', e => {
     createdAt: prev?.createdAt || Date.now(),
     updatedAt: Date.now(),
   });
+  // 食べログのカテゴリなど、まだ選択肢に無いジャンルは選択肢にも追加する
+  const newGenres = shop.genres.filter(g => !db.genres.includes(g));
+  if (newGenres.length) { db.genres = [...db.genres, ...newGenres]; writeMasters(); }
   writeShop(shop);
   $('#shopDialog').close();
   toast(prev ? '更新しました' : `「${shop.name}」を追加しました`);
