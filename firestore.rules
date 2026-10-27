@@ -1,47 +1,82 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ▼ ここに使う2人の Google アカウントのメールアドレスを書く（小文字）
+    // ▼ リストを作成できるのは、この Google アカウントだけ（あなた自身のアドレスに書き換える・小文字）
     //   ※ 実際のアドレスは Firebase コンソールにだけ貼り、このファイル（公開リポジトリ）には書かない
-    function allowedEmails() {
-      return ['you@example.com', 'partner@example.com'];
+    //   相手のアドレスは不要：相手は招待リンク＋Google ログインで参加申請し、作成者が承認する
+    function ownerEmail() {
+      return 'you@example.com';
     }
 
-    // 許可されたアカウントでログインしているか
-    function allowed() {
-      return request.auth != null
+    function signedIn() { return request.auth != null; }
+    function isOwnerAccount() {
+      return signedIn()
         && request.auth.token.email_verified == true
-        && request.auth.token.email.lower() in allowedEmails();
+        && request.auth.token.email.lower() == ownerEmail();
+    }
+    function spaceData(spaceId) {
+      return get(/databases/$(database)/documents/spaces/$(spaceId)).data;
     }
     function isMember(spaceId) {
-      return allowed() &&
-        request.auth.uid in get(/databases/$(database)/documents/spaces/$(spaceId)).data.members;
+      return signedIn() && request.auth.uid in spaceData(spaceId).members;
     }
 
     match /spaces/{spaceId} {
       // 部屋の中身はメンバーだけが読める（部屋の一覧取得は禁止）
-      allow get: if allowed() && request.auth.uid in resource.data.members;
-      // 作成時のメンバーは自分1人だけ
-      allow create: if allowed() && request.resource.data.members == [request.auth.uid];
-      allow update: if allowed() && (
-        // メンバーはメンバー構成以外を変更できる
-        (request.auth.uid in resource.data.members
-          && request.resource.data.members == resource.data.members)
-        // 招待された人は、2人目として自分を追加することだけができる
-        || (!(request.auth.uid in resource.data.members)
-          && resource.data.members.size() < 2
-          && request.resource.data.members == resource.data.members.concat([request.auth.uid])
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']))
-      );
+      allow get: if signedIn() && request.auth.uid in resource.data.members;
+
+      // 部屋を作れるのは作成者のアカウントだけ。作成時のメンバーは自分1人
+      allow create: if isOwnerAccount()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.members == [request.auth.uid];
+
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.members
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && (
+          // メンバー構成を変えない通常の更新（選択肢・名前・招待コードなど）
+          request.resource.data.members == resource.data.members
+          // 作成者が、参加申請を出した人を2人目として承認する
+          || (request.auth.uid == resource.data.ownerUid
+            && resource.data.members.size() == 1
+            && request.resource.data.members.size() == 2
+            && request.resource.data.members[0] == resource.data.members[0]
+            && exists(/databases/$(database)/documents/spaces/$(spaceId)/requests/$(request.resource.data.members[1])))
+          // 作成者が、もう1人をメンバーから外す
+          || (request.auth.uid == resource.data.ownerUid
+            && request.resource.data.members == [resource.data.ownerUid])
+        );
       allow delete: if false;
 
       match /shops/{shopId} {
         allow read, write: if isMember(spaceId);
       }
+
+      // 参加申請：有効な招待コードを知っている人が、自分の分を1件だけ作れる
+      match /requests/{uid} {
+        allow create: if signedIn()
+          && request.auth.uid == uid
+          && spaceData(spaceId).members.size() < 2
+          && spaceData(spaceId).inviteCode is string
+          && spaceData(spaceId).inviteCode.size() >= 20
+          && request.resource.data.code == spaceData(spaceId).inviteCode
+          && request.resource.data.keys().hasOnly(['code', 'name', 'email', 'createdAt'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 100
+          && request.resource.data.email == request.auth.token.email;
+        // 申請者本人は自分の申請の状態だけ見られる。作成者は一覧・削除（承認／拒否）できる
+        allow get: if signedIn()
+          && (request.auth.uid == uid || request.auth.uid == spaceData(spaceId).ownerUid);
+        allow list, delete: if signedIn() && request.auth.uid == spaceData(spaceId).ownerUid;
+      }
     }
 
+    // 自分がどのリストに入っているかの記録。書き込めるのはメンバーになった後だけ
     match /users/{uid} {
-      allow read, write: if allowed() && request.auth.uid == uid;
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if signedIn()
+        && request.auth.uid == uid
+        && isMember(request.resource.data.spaceId);
     }
   }
 }
