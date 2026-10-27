@@ -8,6 +8,12 @@
 <meta name="apple-mobile-web-app-title" content="ご飯屋さんリスト">
 <meta name="application-name" content="ご飯屋さんリスト">
 <meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff">
+<script>
+  // 保存されたテーマを描画前に適用（ちらつき防止）
+  try { var t = localStorage.getItem('futari-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='4' y='4' width='92' height='92' rx='26' fill='%23fabe00'/><text x='50' y='67' font-size='48' text-anchor='middle' fill='%231b2a4e' font-family='Noto Sans JP,sans-serif' font-weight='700'>食</text></svg>">
 <!-- フォント：源ノ角ゴシック（端末に入っていればそれを使い、なければ同一デザインの Noto Sans JP を読み込む） -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,8 +21,9 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400..800&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
 <style>
-  /* 白地 × 紺 × アクセント #fabe00
-     ※ #fabe00 は白地の文字色にはコントラストが足りないため、「塗り＋紺の文字」でのみ使う */
+  /* 白地 × 紺 × アクセント #fabe00（ダークモードは紺地 × 白文字）
+     ※ #fabe00 は文字色にはコントラストが足りないため、「塗り＋紺の文字（--accent-ink）」でのみ使う
+     ※ --navy は「主に使う前景色」。ライトでは紺、ダークでは明るい色になる。--on-navy はその上に載せる文字色 */
   :root {
     --bg: #ffffff;
     --surface: #ffffff;
@@ -31,12 +38,84 @@
     --accent-ink: #1b2a4e;
     --accent-soft: #fff5d1;
     --danger: #c62828;
+    --danger-fill: #c62828;
+    --danger-soft: #fdecec;
+    --danger-line: #f1c9c9;
+    --accent-line: #f3dc8a;
+    --on-navy: #ffffff;
+    --ok-ink: #1f6f43;
+    --warn-ink: #9a5b00;
+    --placeholder: #8a94ad;
+    --backdrop: rgba(27, 42, 78, .45);
+    --gate-bg: #f3f5f9;
+    --pin-want-border: #1b2a4e;
+    --pin-went: #1b2a4e;
+    --pin-went-border: #ffffff;
     --radius: 14px;
     --tap: 44px;
     --bar-h: 64px;
     --font: "Source Han Sans JP", "Source Han Sans", "源ノ角ゴシック JP", "Noto Sans JP", sans-serif;
     color-scheme: light;
   }
+  /* ダークモード：端末の設定に合わせる（設定タブで「ライト」を選んだ場合を除く）／「ダーク」を選んだ場合 */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1526;
+      --surface: #151f36;
+      --surface-2: #1c2845;
+      --navy: #e3e9f7;
+      --navy-2: #b9c6e4;
+      --navy-soft: #24335a;
+      --text: #e8edf8;
+      --muted: #9eabc7;
+      --border: #2c3a5c;
+      --accent-soft: #3a3214;
+      --accent-line: #6b5717;
+      --danger: #ff8a80;
+      --danger-fill: #d64545;
+      --danger-soft: #3a1d22;
+      --danger-line: #6b3038;
+      --on-navy: #0e1526;
+      --ok-ink: #7fd6a4;
+      --warn-ink: #f5c26b;
+      --placeholder: #7d8aa8;
+      --backdrop: rgba(0, 0, 0, .6);
+      --gate-bg: #0e1526;
+      --pin-want-border: #0e1526;
+      --pin-went: #e3e9f7;
+      --pin-went-border: #0e1526;
+      color-scheme: dark;
+    }
+    :root:not([data-theme="light"]) .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.7); }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1526;
+    --surface: #151f36;
+    --surface-2: #1c2845;
+    --navy: #e3e9f7;
+    --navy-2: #b9c6e4;
+    --navy-soft: #24335a;
+    --text: #e8edf8;
+    --muted: #9eabc7;
+    --border: #2c3a5c;
+    --accent-soft: #3a3214;
+    --accent-line: #6b5717;
+    --danger: #ff8a80;
+    --danger-fill: #d64545;
+    --danger-soft: #3a1d22;
+    --danger-line: #6b3038;
+    --on-navy: #0e1526;
+    --ok-ink: #7fd6a4;
+    --warn-ink: #f5c26b;
+    --placeholder: #7d8aa8;
+    --backdrop: rgba(0, 0, 0, .6);
+    --gate-bg: #0e1526;
+    --pin-want-border: #0e1526;
+    --pin-went: #e3e9f7;
+    --pin-went-border: #0e1526;
+    color-scheme: dark;
+  }
+  :root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.7); }
 
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -64,7 +143,7 @@
   .bar { display: flex; align-items: center; gap: 12px; min-height: 56px; }
   .brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
   .brand-mark {
-    width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--navy);
+    width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--accent-ink);
     display: grid; place-items: center; font-weight: 800; font-size: 16px; flex-shrink: 0;
   }
   .bar h1 { margin: 0; font-size: 17px; font-weight: 800; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -95,7 +174,7 @@
   .tabbar button[aria-selected="true"]::after { content: ""; width: 20px; height: 3px; border-radius: 3px; background: var(--accent); margin-top: 2px; }
   .tabbar .tab-add { color: var(--navy); }
   .tabbar .tab-add .plus {
-    width: 48px; height: 48px; border-radius: 16px; background: var(--accent); display: grid; place-items: center;
+    width: 48px; height: 48px; border-radius: 16px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center;
     box-shadow: 0 4px 12px rgba(27, 42, 78, .18);
   }
   .tabbar .tab-add .plus svg.i { width: 24px; height: 24px; stroke-width: 2.6; }
@@ -127,8 +206,8 @@
   .btn:hover { background: var(--surface-2); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .btn.primary:hover { background: #ffc81f; }
-  .btn.navy { background: var(--navy); border-color: var(--navy); color: #fff; }
-  .btn.danger { color: var(--danger); border-color: #f1c9c9; }
+  .btn.navy { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
+  .btn.danger { color: var(--danger); border-color: var(--danger-line); }
   .btn.ghost { background: transparent; border-color: transparent; }
   .btn.sm { min-height: 36px; padding: 4px 12px; font-size: 14px; border-radius: 10px; }
   .btn.big { width: 100%; min-height: 52px; font-size: 16px; }
@@ -137,12 +216,12 @@
     width: 100%; min-height: 48px; border: 1.5px solid var(--border); background: var(--surface); border-radius: 12px;
     padding: 10px 14px; outline: none; min-width: 0; font-size: 16px; /* 16px未満だと iPhone で拡大される */
   }
-  input::placeholder, textarea::placeholder { color: #8a94ad; }
+  input::placeholder, textarea::placeholder { color: var(--placeholder); }
   textarea { resize: vertical; min-height: 96px; }
   input:focus, select:focus, textarea:focus { border-color: var(--navy); box-shadow: 0 0 0 3px var(--accent-soft); }
   .badge {
     display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px;
-    border-radius: 99px; background: var(--navy); color: #fff; font-size: 12px;
+    border-radius: 99px; background: var(--navy); color: var(--on-navy); font-size: 12px;
   }
   .badge:empty { display: none; }
 
@@ -153,8 +232,8 @@
     padding: 4px 14px; cursor: pointer; font-size: 14.5px; line-height: 1.4;
   }
   .chip .n { color: var(--muted); font-size: 12.5px; }
-  .chip.on { background: var(--navy); border-color: var(--navy); color: #fff; }
-  .chip.on .n, .chip.on .x { color: #c9d2e6; }
+  .chip.on { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
+  .chip.on .n, .chip.on .x { color: var(--on-navy); opacity: .75; }
   .chip .x { border: 0; background: none; padding: 0 0 0 4px; margin-right: -4px; cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; min-width: 24px; min-height: 24px; }
 
   .seg { display: flex; background: var(--surface-2); border-radius: 12px; padding: 4px; gap: 4px; }
@@ -200,10 +279,10 @@
     flex-shrink: 0; min-height: 36px; border: 1.5px solid var(--border); background: var(--surface); border-radius: 99px;
     font-size: 13.5px; font-weight: 700; padding: 4px 12px; cursor: pointer; white-space: nowrap; color: var(--muted);
   }
-  .visit.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .visit.on { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
   .tags { display: flex; flex-wrap: wrap; gap: 6px; }
   .tag { font-size: 13px; padding: 2px 10px; border-radius: 7px; line-height: 1.6; }
-  .tag.genre { background: var(--accent-soft); color: var(--navy); font-weight: 700; }
+  .tag.genre { background: var(--accent-soft); color: var(--text); font-weight: 700; }
   .tag.mood { background: var(--navy-soft); color: var(--navy-2); }
   .memo { margin: 0; font-size: 14.5px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
   .links { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -225,15 +304,18 @@
 
   .req-banner {
     display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px;
-    background: var(--accent-soft); color: var(--navy); border: 1px solid #f3dc8a; border-radius: var(--radius); padding: 10px 12px 10px 16px; font-size: 14.5px; font-weight: 700;
+    background: var(--accent-soft); color: var(--text); border: 1px solid var(--accent-line); border-radius: var(--radius); padding: 10px 12px 10px 16px; font-size: 14.5px; font-weight: 700;
   }
 
   /* ---------- マップ ---------- */
   .map-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; font-size: 14.5px; font-weight: 700; }
   .legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); font-weight: 400; align-items: center; }
   .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
-  .legend .want { background: var(--accent); border: 2px solid var(--navy); }
-  .legend .went { background: var(--navy); }
+  .legend .want { background: var(--accent); border: 2px solid var(--pin-want-border); }
+  .legend .went { background: var(--pin-went); border: 2px solid var(--pin-went-border); box-shadow: 0 0 0 1px var(--border); }
+  .leaflet-bar a, .leaflet-bar a:hover { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .leaflet-control-attribution { background: color-mix(in srgb, var(--surface) 80%, transparent) !important; color: var(--muted); }
+  .leaflet-control-attribution a { color: var(--navy-2); }
   #map {
     height: max(360px, calc(100dvh - 260px - var(--bar-h))); border-radius: var(--radius); border: 1px solid var(--border);
     overflow: hidden; background: var(--surface-2); z-index: 0;
@@ -246,16 +328,16 @@
   .pin-wrap { background: none; border: 0; }
   .pin {
     display: block; width: 26px; height: 26px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
-    background: #fabe00; border: 3px solid #1b2a4e; box-shadow: 0 2px 6px rgba(0,0,0,.3);
+    background: #fabe00; border: 3px solid var(--pin-want-border); box-shadow: 0 2px 6px rgba(0,0,0,.3);
   }
-  .pin.visited { background: #1b2a4e; border-color: #fff; }
+  .pin.visited { background: var(--pin-went); border-color: var(--pin-went-border); }
   .pop { font-family: var(--font); color: #1b2a4e; min-width: 190px; max-width: 250px; line-height: 1.5; }
   .pop strong { font-size: 15.5px; display: block; }
   .pop-meta { font-size: 12.5px; color: #5a6683; }
   .pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
   .pop-tags span { font-size: 12px; background: #e8edf6; border-radius: 6px; padding: 1px 8px; }
   .pop .links { gap: 6px; }
-  .pop .lk { min-height: 32px; font-size: 12.5px; padding: 2px 10px; }
+  .pop .lk { background: #fff; color: #1b2a4e; border-color: #dfe4ee; min-height: 32px; font-size: 12.5px; padding: 2px 10px; }
   .pop-edit { margin-top: 8px; min-height: 34px; border: 0; background: #fabe00; color: #1b2a4e; border-radius: 8px; padding: 2px 14px; font-weight: 700; cursor: pointer; }
   .leaflet-container, .gm-style .gm-style-iw { font-family: var(--font); }
 
@@ -272,9 +354,9 @@
   .add-row input { flex: 1; }
   .member { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 15px; }
   .member .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
-  .member.req { border: 1px solid #f3dc8a; border-radius: 12px; padding: 10px 12px; margin-top: 8px; background: var(--accent-soft); }
+  .member.req { border: 1px solid var(--accent-line); border-radius: 12px; padding: 10px 12px; margin-top: 8px; background: var(--accent-soft); }
   .avatar {
-    width: 36px; height: 36px; border-radius: 50%; background: var(--navy); color: #fff;
+    width: 36px; height: 36px; border-radius: 50%; background: var(--navy); color: var(--on-navy);
     display: grid; place-items: center; font-weight: 700; flex-shrink: 0;
   }
   #inviteUrl { font-size: 14px; color: var(--muted); background: var(--surface-2); }
@@ -285,7 +367,7 @@
     border: 0; padding: 0; border-radius: 20px; background: var(--surface); color: var(--text);
     width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); box-shadow: 0 24px 64px rgba(27, 42, 78, .28);
   }
-  dialog::backdrop { background: rgba(27, 42, 78, .45); }
+  dialog::backdrop { background: var(--backdrop); }
   @media (max-width: 640px) {
     dialog { width: 100vw; max-width: 100vw; margin: auto 0 0; border-radius: 20px 20px 0 0; max-height: 94dvh; }
   }
@@ -303,8 +385,8 @@
   .field > label, .field > .label { display: block; font-size: 14px; font-weight: 700; margin-bottom: 6px; }
   .field .req { color: var(--danger); font-size: 12px; margin-left: 4px; }
   .field .help { font-size: 13px; color: var(--muted); margin-top: 6px; }
-  .field .help.ok { color: #1f6f43; }
-  .field .help.warn { color: #9a5b00; }
+  .field .help.ok { color: var(--ok-ink); }
+  .field .help.warn { color: var(--warn-ink); }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 520px) { .two { grid-template-columns: 1fr; } }
   .geo-row { display: flex; gap: 8px; }
@@ -325,7 +407,7 @@
   .choose p { margin: 0 0 20px; white-space: pre-line; color: var(--muted); font-size: 14.5px; }
   .choose-btns { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
   @media (max-width: 640px) { .choose-btns { flex-direction: column-reverse; } .choose-btns .btn { width: 100%; } }
-  .btn.danger-fill { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .btn.danger-fill { background: var(--danger-fill); border-color: var(--danger-fill); color: #fff; }
 
   /* ---------- 選択して削除 ---------- */
   .list-head .tools { display: flex; gap: 8px; align-items: center; }
@@ -337,9 +419,9 @@
     border: 2px solid var(--border); background: var(--surface); display: grid; place-items: center;
   }
   .card.selected .check-ind { background: var(--navy); border-color: var(--navy); }
-  .card.selected .check-ind::after { content: ""; width: 7px; height: 13px; border: solid #fff; border-width: 0 3px 3px 0; transform: rotate(45deg) translate(-1px, -1px); }
+  .card.selected .check-ind::after { content: ""; width: 7px; height: 13px; border: solid var(--on-navy); border-width: 0 3px 3px 0; transform: rotate(45deg) translate(-1px, -1px); }
   .select-bar {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; background: var(--navy); color: #fff;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; background: var(--navy); color: var(--on-navy);
     padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 -6px 20px rgba(27, 42, 78, .2);
   }
   .select-bar .inner { max-width: 1080px; margin: 0 auto; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px 8px; }
@@ -352,8 +434,8 @@
     .select-bar .cnt { flex: 1; text-align: left; order: -1; }
     .select-bar .del { min-height: 44px; font-size: 15px; }
   }
-  .select-bar .btn.ghost { color: #fff; }
-  .select-bar .btn.ghost:hover { background: rgba(255, 255, 255, .12); }
+  .select-bar .btn.ghost { color: var(--on-navy); }
+  .select-bar .btn.ghost:hover { background: color-mix(in srgb, var(--on-navy) 14%, transparent); }
   @media (max-width: 899px) { body.selecting .tabbar { display: none; } }
   body.selecting #app { padding-bottom: calc(140px + env(safe-area-inset-bottom)); }
   body.selecting #toast { bottom: calc(136px + env(safe-area-inset-bottom)); }
@@ -362,20 +444,20 @@
   /* ---------- toast ---------- */
   #toast {
     position: fixed; left: 50%; bottom: calc(var(--bar-h) + 16px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(10px);
-    background: var(--navy); color: #fff; padding: 12px 18px; border-radius: 12px; font-size: 14.5px;
+    background: var(--navy); color: var(--on-navy); padding: 12px 18px; border-radius: 12px; font-size: 14.5px;
     opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 2000; max-width: calc(100vw - 32px);
     box-shadow: 0 8px 24px rgba(27, 42, 78, .25);
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   /* ---------- ログイン前 ---------- */
-  .gate { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: var(--surface-2); }
+  .gate { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: var(--gate-bg); }
   .gate-card {
     width: min(420px, 100%); background: var(--surface); border-radius: 24px;
     padding: 36px 24px 28px; box-shadow: 0 8px 32px rgba(27, 42, 78, .08); text-align: center; display: grid; gap: 16px;
   }
   .gate-logo {
-    width: 64px; height: 64px; border-radius: 20px; background: var(--accent); color: var(--navy);
+    width: 64px; height: 64px; border-radius: 20px; background: var(--accent); color: var(--accent-ink);
     display: grid; place-items: center; font-size: 30px; font-weight: 800; margin: 0 auto;
   }
   .gate-card h1 { font-size: 21px; margin: 0; }
@@ -384,8 +466,8 @@
   /* 日本語を文節の区切りで改行し、1〜2文字だけの行を作らない */
   p, h1, h2, h3, .gate-err, .gate-info, .note { word-break: auto-phrase; text-wrap: pretty; }
   .gate-err, .gate-info { font-size: 14px; text-align: left; border-radius: 12px; padding: 12px 14px; line-height: 1.6; }
-  .gate-err { color: var(--danger); background: #fdecec; }
-  .gate-info { color: var(--navy); background: var(--accent-soft); }
+  .gate-err { color: var(--danger); background: var(--danger-soft); }
+  .gate-info { color: var(--text); background: var(--accent-soft); }
   .gate-loading { padding: 16px 0; }
 
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -514,6 +596,15 @@
         <div class="note">リンクが漏れたかもしれないときは <button class="linkbtn" data-action="regen-invite">招待リンクを再発行</button> してください。古いリンクは使えなくなります。</div>
       </div>
       <div class="note" id="fullNote" hidden>ふたりがそろっています。新しい参加申請は受け付けません。</div>
+    </div>
+
+    <div class="panel">
+      <h2>画面の表示</h2>
+      <div class="seg" id="themeSeg" role="group" aria-label="画面の表示">
+        <button data-theme-opt="auto" aria-pressed="true">端末に合わせる</button>
+        <button data-theme-opt="light" aria-pressed="false">ライト</button>
+        <button data-theme-opt="dark" aria-pressed="false">ダーク</button>
+      </div>
     </div>
 
     <div class="panel">
@@ -1427,6 +1518,8 @@ async function deleteSelected() {
 
 function renderSettings() {
   $('#gmKey').value = lsGet(GM_KEY) || '';
+  const theme = lsGet(THEME_KEY) || 'auto';
+  $$('#themeSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeOpt === theme)));
   const sp = session.space || {};
   const members = sp.members || [];
   const me = session.user?.uid;
@@ -1468,6 +1561,34 @@ function renderSettings() {
    地図（Google マップ / キー未設定時は OpenStreetMap）
    ========================================================= */
 const getGmKey = () => lsGet(GM_KEY) || '';
+
+/* =========================================================
+   ダークモード（auto = 端末の設定に合わせる）
+   ========================================================= */
+const THEME_KEY = 'futari-theme';
+const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+const isDark = () => {
+  const t = document.documentElement.dataset.theme;
+  return t === 'dark' || (!t && darkQuery.matches);
+};
+function applyTheme(theme) {
+  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  $('meta[name="theme-color"]').content = isDark() ? '#0e1526' : '#ffffff';
+}
+function setTheme(theme) {
+  const wasDark = isDark();
+  theme === 'auto' ? lsDel(THEME_KEY) : lsSet(THEME_KEY, theme);
+  applyTheme(theme);
+  renderSettings();
+  // Google マップの配色は作成時にしか決められないため、作り直す
+  if (wasDark !== isDark() && MapView.kind === 'google') MapView.recreateGoogle();
+}
+darkQuery.addEventListener('change', () => {
+  applyTheme(lsGet(THEME_KEY) || 'auto');
+  if (MapView.kind === 'google') MapView.recreateGoogle();
+});
+applyTheme(lsGet(THEME_KEY) || 'auto');
 let gmAuthFailed = false;
 let gmLoading = null;
 window.gm_authFailure = () => {
@@ -1534,6 +1655,7 @@ const MapView = {
     this.map = new google.maps.Map($('#map'), {
       center: DEFAULT_CENTER, zoom: 12, mapId: 'DEMO_MAP_ID',
       mapTypeControl: false, streetViewControl: false, fullscreenControl: true,
+      ...(google.maps.ColorScheme ? { colorScheme: isDark() ? google.maps.ColorScheme.DARK : google.maps.ColorScheme.LIGHT } : {}),
     });
     this.info = new google.maps.InfoWindow();
     $('#mapProvider').textContent = '地図: Google マップ';
@@ -1551,6 +1673,14 @@ const MapView = {
     }).addTo(this.map);
     this.layer = L.layerGroup().addTo(this.map);
     $('#mapProvider').textContent = getGmKey() ? '地図: OpenStreetMap（Googleキー無効）' : '地図: OpenStreetMap';
+  },
+  recreateGoogle() {
+    const old = $('#map');
+    old.replaceWith(old.cloneNode(false));
+    this.markers.clear();
+    this.fitKey = null;
+    this.initGoogle();
+    if (ui.tab === 'map') renderMap();
   },
   fallbackToLeaflet() {
     const old = $('#map');
@@ -1574,7 +1704,9 @@ const MapView = {
     for (const s of pts) {
       if (this.kind === 'google') {
         const pin = new google.maps.marker.PinElement({
-          background: s.visited ? '#1b2a4e' : '#fabe00', borderColor: s.visited ? '#ffffff' : '#1b2a4e', glyphColor: s.visited ? '#ffffff' : '#1b2a4e',
+          ...(s.visited
+            ? (isDark() ? { background: '#e3e9f7', borderColor: '#0e1526', glyphColor: '#0e1526' } : { background: '#1b2a4e', borderColor: '#ffffff', glyphColor: '#ffffff' })
+            : { background: '#fabe00', borderColor: isDark() ? '#0e1526' : '#1b2a4e', glyphColor: '#1b2a4e' }),
         });
         const m = new google.maps.marker.AdvancedMarkerElement({
           map: this.map, position: { lat: s.lat, lng: s.lng }, title: s.name, content: pin.element,
@@ -2012,6 +2144,8 @@ document.addEventListener('click', async e => {
     render();
     return;
   }
+  const th = e.target.closest('[data-theme-opt]');
+  if (th) { setTheme(th.dataset.themeOpt); return; }
   const sc = e.target.closest('[data-select-id]');
   if (sc) { toggleSelect(sc.dataset.selectId); return; }
   const tb = e.target.closest('[data-tab]');
