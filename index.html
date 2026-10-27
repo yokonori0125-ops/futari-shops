@@ -3,10 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ふたりの行きたいお店</title>
-<meta name="description" content="ふたりで行きたいお店をリスト化して共有するページ">
+<title>ご飯屋さんリスト</title>
+<meta name="description" content="ふたりで行きたいご飯屋さんをリスト化して共有するWebアプリ">
+<meta name="apple-mobile-web-app-title" content="ご飯屋さんリスト">
+<meta name="application-name" content="ご飯屋さんリスト">
 <meta name="robots" content="noindex, nofollow">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='4' y='4' width='92' height='92' rx='26' fill='%23fabe00'/><text x='50' y='67' font-size='48' text-anchor='middle' fill='%231b2a4e' font-family='sans-serif'>食</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='4' y='4' width='92' height='92' rx='26' fill='%23fabe00'/><text x='50' y='67' font-size='48' text-anchor='middle' fill='%231b2a4e' font-family='Noto Sans JP,sans-serif' font-weight='700'>食</text></svg>">
+<!-- フォント：源ノ角ゴシック（端末に入っていればそれを使い、なければ同一デザインの Noto Sans JP を読み込む） -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400..800&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
 <style>
   /* 白地 × 紺 × アクセント #fabe00
@@ -28,6 +34,7 @@
     --radius: 14px;
     --tap: 44px;
     --bar-h: 64px;
+    --font: "Source Han Sans JP", "Source Han Sans", "源ノ角ゴシック JP", "Noto Sans JP", sans-serif;
     color-scheme: light;
   }
 
@@ -38,7 +45,7 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: system-ui, -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
+    font-family: var(--font);
     font-size: 16px;
     line-height: 1.6;
     -webkit-tap-highlight-color: transparent;
@@ -242,7 +249,7 @@
     background: #fabe00; border: 3px solid #1b2a4e; box-shadow: 0 2px 6px rgba(0,0,0,.3);
   }
   .pin.visited { background: #1b2a4e; border-color: #fff; }
-  .pop { font-family: inherit; color: #1b2a4e; min-width: 190px; max-width: 250px; line-height: 1.5; }
+  .pop { font-family: var(--font); color: #1b2a4e; min-width: 190px; max-width: 250px; line-height: 1.5; }
   .pop strong { font-size: 15.5px; display: block; }
   .pop-meta { font-size: 12.5px; color: #5a6683; }
   .pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
@@ -250,7 +257,7 @@
   .pop .links { gap: 6px; }
   .pop .lk { min-height: 32px; font-size: 12.5px; padding: 2px 10px; }
   .pop-edit { margin-top: 8px; min-height: 34px; border: 0; background: #fabe00; color: #1b2a4e; border-radius: 8px; padding: 2px 14px; font-weight: 700; cursor: pointer; }
-  .leaflet-container { font-family: inherit; }
+  .leaflet-container, .gm-style .gm-style-iw { font-family: var(--font); }
 
   /* ---------- 設定 ---------- */
   .panel { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 16px; margin-bottom: 14px; }
@@ -374,6 +381,8 @@
   .gate-card h1 { font-size: 21px; margin: 0; }
   #gateBody { display: grid; gap: 14px; }
   #gateBody p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  /* 日本語を文節の区切りで改行し、1〜2文字だけの行を作らない */
+  p, h1, h2, h3, .gate-err, .gate-info, .note { word-break: auto-phrase; text-wrap: pretty; }
   .gate-err, .gate-info { font-size: 14px; text-align: left; border-radius: 12px; padding: 12px 14px; line-height: 1.6; }
   .gate-err { color: var(--danger); background: #fdecec; }
   .gate-info { color: var(--navy); background: var(--accent-soft); }
@@ -387,7 +396,7 @@
 <div id="gate" class="gate">
   <div class="gate-card">
     <div class="gate-logo">食</div>
-    <h1>ふたりの行きたいお店</h1>
+    <h1>ご飯屋さんリスト</h1>
     <div id="gateBody"><p class="gate-loading">読み込み中…</p></div>
   </div>
 </div>
@@ -398,7 +407,7 @@
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">食</span>
       <div style="min-width:0">
-        <h1>ふたりの行きたいお店</h1>
+        <h1>ご飯屋さんリスト</h1>
         <span class="net" id="netStatus" hidden>オフライン（つながると自動で送信）</span>
       </div>
     </div>
@@ -1193,7 +1202,7 @@ function showGate(state, opts = {}) {
     html = `<p class="gate-loading">${esc(opts.text || '読み込み中…')}</p>`;
   } else if (state === 'login') {
     html = `
-      <p>ふたりだけで使う、行きたいお店のリストです。<br>Google アカウントでログインしてください。</p>
+      <p>ふたりだけで使う、行きたいご飯屋さんのリストです。<br>Google アカウントでログインしてください。</p>
       ${pendingJoin() ? '<div class="gate-info">招待リンクから開きました。ログインすると、リストの作成者に参加申請が届きます。</div>' : ''}
       ${isInAppBrowser() ? '<div class="gate-err">LINE などのアプリ内ブラウザでは Google ログインができません。メニューから「ブラウザで開く」（Safari / Chrome）を選んでください。</div>' : ''}
       ${err}
@@ -1794,9 +1803,9 @@ $('#shopForm').addEventListener('submit', e => {
    ========================================================= */
 async function shareInvite() {
   const url = inviteUrl();
-  const text = 'ふたりの行きたいお店リストに招待します。リンクを開いて Google でログインしてください。';
+  const text = '「ご飯屋さんリスト」に招待します。リンクを開いて Google でログインしてください。';
   if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
-    try { await navigator.share({ title: 'ふたりの行きたいお店', text, url }); return; } catch (e) { if (e.name === 'AbortError') return; }
+    try { await navigator.share({ title: 'ご飯屋さんリスト', text, url }); return; } catch (e) { if (e.name === 'AbortError') return; }
   }
   try {
     await navigator.clipboard.writeText(url);
