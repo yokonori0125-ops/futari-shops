@@ -357,14 +357,17 @@
     background: #fabe00; border: 3px solid var(--pin-want-border); box-shadow: 0 2px 6px rgba(0,0,0,.3);
   }
   .pin.visited { background: var(--pin-went); border-color: var(--pin-went-border); }
-  .pop { font-family: var(--font); color: #1b2a4e; min-width: 190px; max-width: 250px; line-height: 1.5; }
-  .pop strong { font-size: 15.5px; display: block; }
-  .pop-meta { font-size: 12.5px; color: #5a6683; }
-  .pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
-  .pop-tags span { font-size: 12px; background: #e8edf6; border-radius: 6px; padding: 1px 8px; }
-  .pop .links { gap: 6px; }
-  .pop .lk { background: #fff; color: #1b2a4e; border-color: #dfe4ee; min-height: 32px; font-size: 12.5px; padding: 2px 10px; }
-  .pop-edit { margin-top: 8px; min-height: 34px; border: 0; background: #fabe00; color: #1b2a4e; border-radius: 8px; padding: 2px 14px; font-weight: 700; cursor: pointer; }
+  /* 地図で選んだお店：一覧と同じカードを地図の上に重ねて表示 */
+  .map-wrap { position: relative; }
+  .map-card {
+    position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 1000; max-height: 62%; overflow-y: auto;
+    border-radius: var(--radius); box-shadow: 0 10px 32px rgba(0, 0, 0, .28); overscroll-behavior: contain;
+  }
+  .map-card .card { border-color: transparent; }
+  .map-card .card-img { aspect-ratio: 16 / 6; }
+  @media (min-width: 900px) { .map-card { left: auto; top: 10px; bottom: auto; width: 380px; max-height: calc(100% - 20px); } .map-card .card-img { aspect-ratio: 16 / 7; } }
+  .pin.sel { transform: rotate(-45deg) scale(1.3); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 8px rgba(0,0,0,.4); }
+  .pin { transition: transform .15s; }
   .leaflet-container, .gm-style .gm-style-iw { font-family: var(--font); }
 
   /* ---------- 設定 ---------- */
@@ -600,7 +603,10 @@
         <span class="provider" id="mapProvider"></span>
       </div>
     </div>
-    <div id="map"></div>
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div class="map-card" id="mapCard" hidden aria-live="polite"></div>
+    </div>
     <div class="nopos-box" id="noPos"></div>
   </section>
 
@@ -933,7 +939,7 @@ let db = { shops: [], genres: [...DEFAULT_GENRES], moods: [...DEFAULT_MOODS] };
 const session = { user: null, spaceId: null, space: null, loaded: false, unsubs: [], infoSynced: false, requests: [], requestsListening: false, badLink: false };
 const ui = {
   tab: 'list', q: '', status: 'all', match: 'any', sort: lsGet('futari-sort') || 'new',
-  selecting: false, selected: new Set(),
+  selecting: false, selected: new Set(), mapSel: null,
   areas: new Set(), genres: new Set(), moods: new Set(),
   filtersOpen: false,
 };
@@ -1475,7 +1481,7 @@ function selectCardHTML(s) {
     ${tags ? `<div class="tags">${tags}</div>` : ''}
   </article>`;
 }
-function cardHTML(s) {
+function cardHTML(s, opts = {}) {
   const tags = [
     ...s.genres.map(g => `<span class="tag genre">${esc(g)}</span>`),
     ...s.moods.map(m => `<span class="tag mood">${esc(m)}</span>`),
@@ -1495,7 +1501,9 @@ function cardHTML(s) {
     ${s.memo ? `<p class="memo">${esc(s.memo)}</p>` : ''}
     <div class="links">${linksHTML(s)}</div>
     <div class="card-foot">
-      ${hasPos(s) ? `<button class="btn sm" data-action="show-on-map" data-id="${esc(s.id)}">地図で見る</button>` : `<span class="nopos">位置未設定</span>`}
+      ${opts.inMap
+        ? '<button class="btn sm" data-action="map-close">閉じる</button>'
+        : hasPos(s) ? `<button class="btn sm" data-action="show-on-map" data-id="${esc(s.id)}">地図で見る</button>` : `<span class="nopos">位置未設定</span>`}
     </div>
   </article>`;
 }
@@ -1653,22 +1661,28 @@ function loadGoogle(key) {
   return gmLoading;
 }
 
-function popupHTML(s) {
-  const tags = [...s.genres, ...s.moods].map(t => `<span>${esc(t)}</span>`).join('');
-  return `<div class="pop">
-    <strong>${esc(s.name)}</strong>
-    <div class="pop-meta">${esc(s.area || NO_AREA)}${s.visited ? '・行った' : ''}${s.tabelog && s.rating != null ? `・食べログ ★${s.rating.toFixed(2)}` : ''}</div>
-    ${tags ? `<div class="pop-tags">${tags}</div>` : ''}
-    <div class="links">${linksHTML(s)}</div>
-    <button class="pop-edit" data-edit="${esc(s.id)}">編集</button>
-  </div>`;
+// 地図で選んだお店のカード（一覧と同じ内容）
+function selectOnMap(id) {
+  ui.mapSel = id;
+  renderMapCard();
+  if (ui.mapSel) MapView.revealBesideCard(db.shops.find(x => x.id === id));
+}
+function renderMapCard() {
+  const el = $('#mapCard');
+  const s = ui.mapSel && filtered().find(x => x.id === ui.mapSel && hasPos(x));
+  if (!s) ui.mapSel = null; // 削除された・絞り込みで消えた・位置が外された
+  el.hidden = !s;
+  const keep = el.dataset.id === (s?.id || '') ? el.scrollTop : 0; // 同じお店の更新ならスクロール位置を保つ
+  el.innerHTML = s ? cardHTML(s, { inMap: true }) : '';
+  el.dataset.id = s?.id || '';
+  el.scrollTop = keep;
+  MapView.highlight(ui.mapSel);
 }
 
 const MapView = {
   kind: null,       // 'google' | 'leaflet' | 'none'
   map: null,
   layer: null,
-  info: null,
   markers: new Map(),
   ready: null,
   fitKey: null,
@@ -1699,7 +1713,7 @@ const MapView = {
       mapTypeControl: false, streetViewControl: false, fullscreenControl: true,
       ...(google.maps.ColorScheme ? { colorScheme: isDark() ? google.maps.ColorScheme.DARK : google.maps.ColorScheme.LIGHT } : {}),
     });
-    this.info = new google.maps.InfoWindow();
+    this.map.addListener('click', () => selectOnMap(null)); // 地図の何もない所をタップで閉じる
     $('#mapProvider').textContent = '地図: Google マップ';
   },
   initLeaflet() {
@@ -1714,6 +1728,7 @@ const MapView = {
       maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(this.map);
     this.layer = L.layerGroup().addTo(this.map);
+    this.map.on('click', () => selectOnMap(null)); // 地図の何もない所をタップで閉じる
     $('#mapProvider').textContent = getGmKey() ? '地図: OpenStreetMap（Googleキー無効）' : '地図: OpenStreetMap';
   },
   recreateGoogle() {
@@ -1753,14 +1768,14 @@ const MapView = {
         const m = new google.maps.marker.AdvancedMarkerElement({
           map: this.map, position: { lat: s.lat, lng: s.lng }, title: s.name, content: pin.element,
         });
-        m.addListener('click', () => this.openInfo(s.id));
+        m.addListener('click', () => selectOnMap(s.id));
         this.markers.set(s.id, m);
       } else {
         const icon = L.divIcon({
           className: 'pin-wrap', html: `<span class="pin${s.visited ? ' visited' : ''}"></span>`,
-          iconSize: [24, 24], iconAnchor: [12, 28], popupAnchor: [0, -26],
+          iconSize: [24, 24], iconAnchor: [12, 28],
         });
-        const m = L.marker([s.lat, s.lng], { icon, title: s.name }).bindPopup(popupHTML(s), { maxWidth: 260 });
+        const m = L.marker([s.lat, s.lng], { icon, title: s.name, keyboard: true }).on('click', () => selectOnMap(s.id));
         this.layer.addLayer(m);
         this.markers.set(s.id, m);
       }
@@ -1785,22 +1800,39 @@ const MapView = {
     if (this.kind === 'google') { this.map.setCenter({ lat: s.lat, lng: s.lng }); this.map.setZoom(zoom); }
     else if (this.kind === 'leaflet') this.map.setView([s.lat, s.lng], zoom);
   },
-  openInfo(id) {
-    const s = db.shops.find(x => x.id === id);
-    const m = this.markers.get(id);
-    if (!s || !m) return;
+  // 選んだピンがカードに隠れないよう、カード以外の見えている範囲の中央へ動かす
+  revealBesideCard(s) {
+    const card = $('#mapCard');
+    if (!s || !hasPos(s) || !this.map || this.kind === 'none' || card.hidden) return;
+    const side = window.innerWidth >= 900; // デスクトップはカードが右、スマホは下
+    const dx = side ? (card.offsetWidth + 10) / 2 : 0;
+    const dy = side ? 0 : (card.offsetHeight + 10) / 2;
     if (this.kind === 'google') {
-      this.info.setContent(popupHTML(s));
-      this.info.open({ anchor: m, map: this.map });
+      this.map.panTo({ lat: s.lat, lng: s.lng });
+      this.map.panBy(dx, dy);
     } else {
-      m.openPopup();
+      this.map.panTo([s.lat, s.lng], { animate: false });
+      this.map.panBy([dx, dy], { animate: true });
+    }
+  },
+  // 選択中のピンを強調
+  highlight(id) {
+    for (const [sid, m] of this.markers) {
+      const on = sid === id;
+      if (this.kind === 'google') {
+        m.content.style.transform = on ? 'scale(1.3)' : '';
+        m.zIndex = on ? 1000 : null;
+      } else {
+        m.getElement()?.querySelector('.pin')?.classList.toggle('sel', on);
+        m.setZIndexOffset(on ? 1000 : 0);
+      }
     }
   },
   focus(id) {
     const s = db.shops.find(x => x.id === id);
     if (!s || !hasPos(s)) return;
     this.setView(s, 16);
-    this.openInfo(id);
+    selectOnMap(id);
   },
   resize() {
     if (this.kind === 'leaflet') this.map.invalidateSize();
@@ -1819,6 +1851,7 @@ async function renderMap(focusId) {
   await MapView.init();
   MapView.resize();
   MapView.update(list);
+  renderMapCard();
   if (focusId) {
     // 絞り込みで隠れている場合は条件を外して表示
     if (!MapView.markers.has(focusId)) { clearFilters(false); MapView.update(filtered()); renderFilters(); }
@@ -2290,6 +2323,7 @@ function addSamples() {
 function switchTab(tab, focusId) {
   ui.tab = tab;
   if (tab !== 'list') { ui.selecting = false; ui.selected.clear(); }
+  if (tab !== 'map' && !focusId) ui.mapSel = null;
   if (tab === 'map' && window.innerWidth <= 760) ui.filtersOpen = false; // スマホでは地図を広く
   render();
   if (tab === 'map' && focusId) renderMap(focusId);
@@ -2363,6 +2397,7 @@ document.addEventListener('click', async e => {
     case 'reload': location.reload(); break;
     case 'share-invite': shareInvite(); break;
     case 'select-mode': setSelecting(true); break;
+    case 'map-close': selectOnMap(null); break;
     case 'select-cancel': setSelecting(false); break;
     case 'select-all': {
       const list = sorted(filtered());
@@ -2450,6 +2485,7 @@ function toggleSelect(id) {
 }
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && ui.selecting && !document.querySelector('dialog[open]')) { setSelecting(false); return; }
+  if (e.key === 'Escape' && ui.mapSel && ui.tab === 'map' && !document.querySelector('dialog[open]')) { selectOnMap(null); return; }
   const sc = e.target.closest?.('[data-select-id]');
   if (sc && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); toggleSelect(sc.dataset.selectId); }
 });
