@@ -6,54 +6,29 @@
 <title>ふたりの行きたいお店</title>
 <meta name="description" content="ふたりで行きたいお店をリスト化して共有するページ">
 <meta name="robots" content="noindex, nofollow">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%23d2553a'/><text x='50' y='67' font-size='48' text-anchor='middle' fill='white' font-family='sans-serif'>食</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='4' y='4' width='92' height='92' rx='26' fill='%23fabe00'/><text x='50' y='67' font-size='48' text-anchor='middle' fill='%231b2a4e' font-family='sans-serif'>食</text></svg>">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
 <style>
+  /* 白地 × 紺 × アクセント #fabe00
+     ※ #fabe00 は白地の文字色にはコントラストが足りないため、「塗り＋紺の文字」でのみ使う */
   :root {
-    --bg: #faf7f2;
+    --bg: #ffffff;
     --surface: #ffffff;
-    --surface-2: #f3eee6;
-    --text: #2a2420;
-    --muted: #776c62;
-    --border: #e6ded3;
-    --accent: #d2553a;
-    --accent-ink: #ffffff;
-    --accent-soft: #fbe6df;
-    --accent-soft-ink: #9a3420;
-    --ok: #2f8a58;
-    --ok-soft: #e0f2e7;
-    --warn: #a86a00;
-    --danger: #c0392b;
-    --shadow: 0 1px 2px rgba(40, 30, 20, .06), 0 6px 20px rgba(40, 30, 20, .05);
+    --surface-2: #f3f5f9;
+    --navy: #1b2a4e;
+    --navy-2: #2f4472;
+    --navy-soft: #e8edf6;
+    --text: #1b2a4e;
+    --muted: #5a6683;
+    --border: #dfe4ee;
+    --accent: #fabe00;
+    --accent-ink: #1b2a4e;
+    --accent-soft: #fff5d1;
+    --danger: #c62828;
     --radius: 14px;
+    --tap: 44px;
+    --bar-h: 64px;
     color-scheme: light;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #171411;
-      --surface: #221e1a;
-      --surface-2: #2c2722;
-      --text: #f2ece5;
-      --muted: #a99e93;
-      --border: #3b342e;
-      --accent: #ee7a5c;
-      --accent-ink: #1c120e;
-      --accent-soft: #3e2620;
-      --accent-soft-ink: #f6b4a2;
-      --ok: #62c58f;
-      --ok-soft: #1d3328;
-      --warn: #e0a640;
-      --danger: #ef7064;
-      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
-      color-scheme: dark;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #171411; --surface: #221e1a; --surface-2: #2c2722; --text: #f2ece5; --muted: #a99e93;
-    --border: #3b342e; --accent: #ee7a5c; --accent-ink: #1c120e; --accent-soft: #3e2620; --accent-soft-ink: #f6b4a2;
-    --ok: #62c58f; --ok-soft: #1d3328; --warn: #e0a640; --danger: #ef7064;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
-    color-scheme: dark;
   }
 
   * { box-sizing: border-box; }
@@ -64,264 +39,315 @@
     background: var(--bg);
     color: var(--text);
     font-family: system-ui, -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1.6;
-    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+    -webkit-tap-highlight-color: transparent;
   }
+  #app { padding-bottom: calc(var(--bar-h) + 24px + env(safe-area-inset-bottom)); }
   button, input, select, textarea { font: inherit; color: inherit; }
   a { color: inherit; }
   .muted { color: var(--muted); }
   .small { font-size: 13px; }
+  :focus-visible { outline: 3px solid var(--navy); outline-offset: 2px; border-radius: 6px; }
+  svg.i { width: 20px; height: 20px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
-  /* ---------- header / tabs ---------- */
-  .app-header {
-    position: sticky; top: 0; z-index: 1000;
-    background: color-mix(in srgb, var(--bg) 88%, transparent);
-    backdrop-filter: saturate(1.4) blur(10px);
-    -webkit-backdrop-filter: saturate(1.4) blur(10px);
-    border-bottom: 1px solid var(--border);
+  /* ---------- header ---------- */
+  .app-header { position: sticky; top: 0; z-index: 1000; background: var(--bg); border-bottom: 1px solid var(--border); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+  .bar { display: flex; align-items: center; gap: 12px; min-height: 56px; }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+  .brand-mark {
+    width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--navy);
+    display: grid; place-items: center; font-weight: 800; font-size: 16px; flex-shrink: 0;
   }
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
-  .bar { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-top: 14px; }
-  .bar h1 { margin: 0; font-size: 19px; letter-spacing: .02em; }
+  .bar h1 { margin: 0; font-size: 17px; font-weight: 800; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bar .count { font-size: 13px; color: var(--muted); white-space: nowrap; }
-  .tabs { display: flex; gap: 4px; margin-top: 8px; overflow-x: auto; scrollbar-width: none; }
-  .tabs button {
-    border: 0; background: none; padding: 10px 14px; cursor: pointer;
-    color: var(--muted); font-weight: 600; border-bottom: 2.5px solid transparent; white-space: nowrap;
+  @media (max-width: 480px) { .bar .count { display: none; } }
+  .net { display: block; font-size: 11.5px; color: var(--danger); font-weight: 600; }
+  .icon-btn {
+    position: relative; width: var(--tap); height: var(--tap); display: grid; place-items: center;
+    border: 0; background: none; border-radius: 12px; cursor: pointer; color: var(--navy);
   }
-  .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  .icon-btn:hover { background: var(--surface-2); }
+  .icon-btn[aria-selected="true"] { background: var(--navy-soft); }
+  .dot { position: absolute; top: 8px; right: 8px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); }
+
+  /* ---------- 下部タブバー（親指で届く位置） ---------- */
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1100;
+    display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center;
+    height: calc(var(--bar-h) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom);
+    background: var(--bg); border-top: 1px solid var(--border);
+  }
+  .tabbar button {
+    height: 100%; border: 0; background: none; cursor: pointer; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 12px; font-weight: 700;
+  }
+  .tabbar button[aria-selected="true"] { color: var(--navy); }
+  .tabbar button[aria-selected="true"] svg.i { stroke-width: 2.4; }
+  .tabbar button[aria-selected="true"]::after { content: ""; width: 20px; height: 3px; border-radius: 3px; background: var(--accent); margin-top: 2px; }
+  .tabbar .tab-add { color: var(--navy); }
+  .tabbar .tab-add .plus {
+    width: 48px; height: 48px; border-radius: 16px; background: var(--accent); display: grid; place-items: center;
+    box-shadow: 0 4px 12px rgba(27, 42, 78, .18);
+  }
+  .tabbar .tab-add .plus svg.i { width: 24px; height: 24px; stroke-width: 2.6; }
+  .tabbar .tab-add span.lbl { display: none; }
+  @media (min-width: 900px) {
+    :root { --bar-h: 0px; }
+    #app { padding-bottom: 40px; }
+    .tabbar {
+      position: sticky; top: 56px; height: auto; padding: 0; grid-template-columns: none; display: flex; justify-content: center; gap: 8px;
+      border-top: 0; border-bottom: 1px solid var(--border); z-index: 999;
+    }
+    .tabbar button { flex-direction: row; gap: 8px; font-size: 14.5px; padding: 12px 18px; height: auto; }
+    .tabbar button[aria-selected="true"]::after { display: none; }
+    .tabbar button[aria-selected="true"] { box-shadow: inset 0 -3px 0 var(--accent); }
+    .tabbar .tab-add { order: 3; margin-left: 12px; }
+    .tabbar .tab-add .plus { width: auto; height: 40px; padding: 0 16px; border-radius: 10px; box-shadow: none; display: flex; gap: 6px; font-size: 14.5px; }
+    .tabbar .tab-add span.lbl { display: inline; }
+    .tabbar .tab-add .plus svg.i { width: 20px; height: 20px; }
+  }
 
   main.wrap { padding-top: 16px; }
 
-  /* ---------- generic controls ---------- */
+  /* ---------- controls ---------- */
   .btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    border: 1px solid var(--border); background: var(--surface); border-radius: 10px;
-    padding: 8px 14px; cursor: pointer; font-weight: 600; font-size: 14px; text-decoration: none;
-    transition: background .15s, border-color .15s;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--tap);
+    border: 1px solid var(--border); background: var(--surface); border-radius: 12px; color: var(--navy);
+    padding: 8px 16px; cursor: pointer; font-weight: 700; font-size: 15px; text-decoration: none; transition: background .15s;
   }
   .btn:hover { background: var(--surface-2); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-  .btn.primary:hover { filter: brightness(1.05); }
-  .btn.danger { color: var(--danger); }
-  .btn.ghost { background: transparent; }
-  .btn.sm { padding: 5px 10px; font-size: 13px; border-radius: 8px; }
+  .btn.primary:hover { background: #ffc81f; }
+  .btn.navy { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .btn.danger { color: var(--danger); border-color: #f1c9c9; }
+  .btn.ghost { background: transparent; border-color: transparent; }
+  .btn.sm { min-height: 36px; padding: 4px 12px; font-size: 14px; border-radius: 10px; }
+  .btn.big { width: 100%; min-height: 52px; font-size: 16px; }
   .btn:disabled { opacity: .5; cursor: default; }
   input[type="text"], input[type="url"], input[type="search"], input[type="password"], select, textarea {
-    width: 100%; border: 1px solid var(--border); background: var(--surface); border-radius: 10px;
-    padding: 9px 12px; outline: none; min-width: 0;
+    width: 100%; min-height: 48px; border: 1.5px solid var(--border); background: var(--surface); border-radius: 12px;
+    padding: 10px 14px; outline: none; min-width: 0; font-size: 16px; /* 16px未満だと iPhone で拡大される */
   }
-  textarea { resize: vertical; min-height: 72px; }
-  input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  input::placeholder, textarea::placeholder { color: #8a94ad; }
+  textarea { resize: vertical; min-height: 96px; }
+  input:focus, select:focus, textarea:focus { border-color: var(--navy); box-shadow: 0 0 0 3px var(--accent-soft); }
   .badge {
     display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px;
-    border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: 12px;
+    border-radius: 99px; background: var(--navy); color: #fff; font-size: 12px;
   }
   .badge:empty { display: none; }
 
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
   .chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    border: 1px solid var(--border); background: var(--surface); border-radius: 99px;
-    padding: 4px 12px; cursor: pointer; font-size: 13.5px; line-height: 1.5;
+    display: inline-flex; align-items: center; gap: 6px; min-height: 38px;
+    border: 1.5px solid var(--border); background: var(--surface); border-radius: 99px; color: var(--navy);
+    padding: 4px 14px; cursor: pointer; font-size: 14.5px; line-height: 1.4;
   }
-  .chip .n { color: var(--muted); font-size: 12px; }
-  .chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-  .chip.on .n { color: inherit; opacity: .8; }
-  .chip .x { border: 0; background: none; padding: 0 0 0 2px; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; }
+  .chip .n { color: var(--muted); font-size: 12.5px; }
+  .chip.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .chip.on .n, .chip.on .x { color: #c9d2e6; }
+  .chip .x { border: 0; background: none; padding: 0 0 0 4px; margin-right: -4px; cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; min-width: 24px; min-height: 24px; }
 
-  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
-  .seg button { border: 0; background: none; padding: 5px 12px; cursor: pointer; font-size: 13.5px; }
-  .seg button + button { border-left: 1px solid var(--border); }
-  .seg button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
-
-  /* ---------- filters ---------- */
-  .filters {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 12px; box-shadow: var(--shadow); margin-bottom: 16px;
+  .seg { display: flex; background: var(--surface-2); border-radius: 12px; padding: 4px; gap: 4px; }
+  .seg button {
+    flex: 1; min-height: 38px; white-space: nowrap; border: 0; background: none; border-radius: 9px; cursor: pointer; font-size: 14.5px; font-weight: 700; color: var(--muted); padding: 0 12px;
   }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--navy); box-shadow: 0 1px 3px rgba(27, 42, 78, .15); }
+
+  /* ---------- 検索・絞り込み ---------- */
+  .filters { margin-bottom: 16px; display: grid; gap: 10px; }
   .filter-top { display: flex; gap: 8px; }
-  .filter-top input { flex: 1; }
-  .filter-body { display: grid; gap: 12px; margin-top: 14px; }
-  .frow { display: grid; grid-template-columns: 76px 1fr; gap: 10px; align-items: start; }
-  .flabel { font-size: 13px; font-weight: 700; color: var(--muted); padding-top: 5px; }
-  .ffoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px dashed var(--border); padding-top: 12px; }
-  .ffoot .hint { font-size: 12.5px; color: var(--muted); }
-  @media (max-width: 560px) {
-    .frow { grid-template-columns: 1fr; gap: 6px; }
-    .flabel { padding-top: 0; }
-  }
+  .search { position: relative; flex: 1; }
+  .search svg.i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+  .search input { padding-left: 44px; background: var(--surface-2); border-color: transparent; }
+  .search input:focus { background: var(--surface); }
+  #filterToggle { min-height: 48px; }
+  #filterToggle[aria-expanded="true"] { background: var(--navy-soft); border-color: var(--navy-soft); }
+  .active-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .active-filters:empty { display: none; }
+  .active-filters .chip { min-height: 34px; font-size: 13.5px; padding: 2px 6px 2px 12px; }
+  .filter-body { display: grid; gap: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .fgroup h3 { margin: 0 0 8px; font-size: 13px; font-weight: 800; color: var(--muted); letter-spacing: .04em; }
+  .ffoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--border); padding-top: 14px; }
+  .ffoot .hint { font-size: 13px; color: var(--muted); }
+  .ffoot .seg { flex: 0 1 auto; }
+  @media (max-width: 480px) { .ffoot > div, .ffoot .seg { width: 100%; } .ffoot #clearFilters { width: 100%; } }
+  @media (min-width: 900px) { #statusSeg { max-width: 420px; } }
 
-  /* ---------- list ---------- */
+  /* ---------- 一覧 ---------- */
   .list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-  .list-head select { width: auto; padding: 6px 10px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .list-head select { width: auto; min-height: 40px; padding: 6px 12px; font-size: 14px; border-radius: 10px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
   @media (max-width: 400px) { .cards { grid-template-columns: 1fr; } }
   .card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 14px 14px 10px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; min-width: 0;
+    padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 10px; min-width: 0;
   }
-  .card.visited { border-left: 4px solid var(--ok); }
-  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-  .card h3 { margin: 0; font-size: 16.5px; line-height: 1.4; overflow-wrap: anywhere; }
-  .card .area { font-size: 13px; color: var(--muted); }
+  .card.visited { background: var(--surface-2); }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .card h3 { margin: 0; font-size: 17px; line-height: 1.4; overflow-wrap: anywhere; }
+  .card .area { font-size: 13.5px; color: var(--muted); margin-top: 2px; }
   .visit {
-    flex-shrink: 0; border: 1px solid var(--border); background: var(--surface); border-radius: 99px;
-    font-size: 12.5px; padding: 3px 10px; cursor: pointer; white-space: nowrap; color: var(--muted);
+    flex-shrink: 0; min-height: 36px; border: 1.5px solid var(--border); background: var(--surface); border-radius: 99px;
+    font-size: 13.5px; font-weight: 700; padding: 4px 12px; cursor: pointer; white-space: nowrap; color: var(--muted);
   }
-  .visit.on { background: var(--ok-soft); border-color: transparent; color: var(--ok); font-weight: 700; }
-  .tags { display: flex; flex-wrap: wrap; gap: 5px; }
-  .tag { font-size: 12.5px; padding: 2px 9px; border-radius: 6px; }
-  .tag.genre { background: var(--accent-soft); color: var(--accent-soft-ink); font-weight: 600; }
-  .tag.mood { border: 1px solid var(--border); color: var(--muted); }
-  .memo { margin: 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
-  .links { display: flex; flex-wrap: wrap; gap: 6px; }
+  .visit.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { font-size: 13px; padding: 2px 10px; border-radius: 7px; line-height: 1.6; }
+  .tag.genre { background: var(--accent-soft); color: var(--navy); font-weight: 700; }
+  .tag.mood { background: var(--navy-soft); color: var(--navy-2); }
+  .memo { margin: 0; font-size: 14.5px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; }
   .lk {
-    display: inline-flex; align-items: center; gap: 6px; text-decoration: none; font-size: 13px; font-weight: 600;
-    border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; background: var(--surface-2);
+    display: inline-flex; align-items: center; gap: 6px; min-height: 36px; text-decoration: none; font-size: 13.5px; font-weight: 700;
+    border: 1.5px solid var(--border); border-radius: 10px; padding: 4px 12px; color: var(--navy); background: var(--surface);
   }
-  .lk::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
-  .lk:hover { border-color: var(--dot); }
-  .lk-g { --dot: #3b8ed8; } .lk-t { --dot: #e8892b; } .lk-i { --dot: #d0428b; }
-  .card-foot { display: flex; justify-content: flex-end; gap: 4px; border-top: 1px solid var(--border); padding-top: 8px; margin-top: auto; }
-  .card-foot .btn { border: 0; background: none; padding: 4px 8px; font-weight: 500; color: var(--muted); }
-  .card-foot .btn:hover { color: var(--text); background: var(--surface-2); }
-  .card-foot .nopos { margin-right: auto; font-size: 12px; color: var(--muted); align-self: center; }
+  .lk:hover { border-color: var(--navy); }
+  .lk svg.i { width: 16px; height: 16px; }
+  .card-foot { display: flex; justify-content: flex-end; gap: 4px; border-top: 1px solid var(--border); padding-top: 6px; margin-top: auto; }
+  .card-foot .btn { border: 0; background: none; min-height: 40px; padding: 4px 10px; font-weight: 700; color: var(--navy-2); font-size: 14px; }
+  .card-foot .btn:hover { background: var(--navy-soft); }
+  .card-foot .nopos { margin-right: auto; font-size: 13px; color: var(--muted); align-self: center; }
+  .card-foot .btn:first-child:not(:only-child) { margin-right: auto; }
 
-  .empty {
-    text-align: center; padding: 48px 16px; border: 1.5px dashed var(--border); border-radius: var(--radius); color: var(--muted);
-  }
-  .empty p { margin: 0 0 14px; }
+  .empty { text-align: center; padding: 48px 16px; border: 1.5px dashed var(--border); border-radius: var(--radius); color: var(--muted); }
+  .empty p { margin: 0 0 16px; }
   .empty .btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
-  /* ---------- map ---------- */
-  .map-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; font-size: 14px; }
-  .legend { display: flex; gap: 12px; font-size: 13px; color: var(--muted); }
-  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+  .req-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px;
+    background: var(--accent-soft); color: var(--navy); border: 1px solid #f3dc8a; border-radius: var(--radius); padding: 10px 12px 10px 16px; font-size: 14.5px; font-weight: 700;
+  }
+
+  /* ---------- マップ ---------- */
+  .map-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; font-size: 14.5px; font-weight: 700; }
+  .legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); font-weight: 400; align-items: center; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+  .legend .want { background: var(--accent); border: 2px solid var(--navy); }
+  .legend .went { background: var(--navy); }
   #map {
-    height: max(360px, calc(100dvh - 330px)); border-radius: var(--radius); border: 1px solid var(--border);
+    height: max(360px, calc(100dvh - 260px - var(--bar-h))); border-radius: var(--radius); border: 1px solid var(--border);
     overflow: hidden; background: var(--surface-2); z-index: 0;
   }
   .map-msg { display: grid; place-items: center; height: 100%; padding: 24px; text-align: center; color: var(--muted); }
-  .nopos-box { margin-top: 12px; font-size: 13.5px; }
-  .nopos-box .chips { margin-top: 6px; }
+  .nopos-box { margin-top: 12px; font-size: 14px; }
+  .nopos-box .chips { margin-top: 8px; }
   .provider { font-size: 12px; color: var(--muted); }
 
   .pin-wrap { background: none; border: 0; }
   .pin {
-    display: block; width: 24px; height: 24px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
-    background: #d2553a; border: 2.5px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.35);
+    display: block; width: 26px; height: 26px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+    background: #fabe00; border: 3px solid #1b2a4e; box-shadow: 0 2px 6px rgba(0,0,0,.3);
   }
-  .pin.visited { background: #2f8a58; }
-  .pop { font-family: inherit; color: #2a2420; min-width: 180px; max-width: 240px; line-height: 1.5; }
-  .pop strong { font-size: 15px; display: block; }
-  .pop-meta { font-size: 12px; color: #776c62; }
+  .pin.visited { background: #1b2a4e; border-color: #fff; }
+  .pop { font-family: inherit; color: #1b2a4e; min-width: 190px; max-width: 250px; line-height: 1.5; }
+  .pop strong { font-size: 15.5px; display: block; }
+  .pop-meta { font-size: 12.5px; color: #5a6683; }
   .pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
-  .pop-tags span { font-size: 11.5px; background: #f3eee6; border-radius: 5px; padding: 1px 7px; }
-  .pop .links { gap: 4px; }
-  .pop .lk { background: #f3eee6; border-color: #e6ded3; color: #2a2420; font-size: 12px; padding: 2px 8px; }
-  .pop-edit { margin-top: 8px; border: 1px solid #e6ded3; background: #fff; color: #2a2420; border-radius: 7px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
+  .pop-tags span { font-size: 12px; background: #e8edf6; border-radius: 6px; padding: 1px 8px; }
+  .pop .links { gap: 6px; }
+  .pop .lk { min-height: 32px; font-size: 12.5px; padding: 2px 10px; }
+  .pop-edit { margin-top: 8px; min-height: 34px; border: 0; background: #fabe00; color: #1b2a4e; border-radius: 8px; padding: 2px 14px; font-weight: 700; cursor: pointer; }
   .leaflet-container { font-family: inherit; }
 
-  /* ---------- settings ---------- */
-  .panel {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 16px; box-shadow: var(--shadow); margin-bottom: 16px;
-  }
-  .panel h2 { margin: 0 0 6px; font-size: 16px; }
-  .panel p { margin: 0 0 12px; font-size: 14px; color: var(--muted); }
+  /* ---------- 設定 ---------- */
+  .panel { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 16px; margin-bottom: 14px; }
+  .panel h2 { margin: 0 0 8px; font-size: 16.5px; }
+  .panel p { margin: 0 0 12px; font-size: 14.5px; color: var(--muted); }
   .panel .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .panel .row input { flex: 1 1 220px; }
-  .note {
-    font-size: 13px; background: var(--surface-2); border-radius: 10px; padding: 10px 12px; margin: 12px 0 0; color: var(--muted);
-  }
-  .note.warn { color: var(--warn); }
+  .panel h3.sub { font-size: 14px; margin: 16px 0 6px; }
+  .note { font-size: 13.5px; background: var(--surface-2); border-radius: 12px; padding: 12px 14px; margin: 12px 0 0; color: var(--muted); }
   .note ol, .note ul { margin: 4px 0 0; padding-left: 20px; }
-  .add-row { display: flex; gap: 6px; margin-top: 10px; }
+  .add-row { display: flex; gap: 8px; margin-top: 10px; }
   .add-row input { flex: 1; }
-
-  /* ---------- FAB ---------- */
-  .fab {
-    position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 1100;
-    border: 0; border-radius: 99px; padding: 14px 20px; font-weight: 700; font-size: 15px; cursor: pointer;
-    background: var(--accent); color: var(--accent-ink); box-shadow: 0 6px 20px rgba(0,0,0,.22);
+  .member { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 15px; }
+  .member .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
+  .member.req { border: 1px solid #f3dc8a; border-radius: 12px; padding: 10px 12px; margin-top: 8px; background: var(--accent-soft); }
+  .avatar {
+    width: 36px; height: 36px; border-radius: 50%; background: var(--navy); color: #fff;
+    display: grid; place-items: center; font-weight: 700; flex-shrink: 0;
   }
+  #inviteUrl { font-size: 14px; color: var(--muted); background: var(--surface-2); }
+  .linkbtn { border: 0; background: none; padding: 0; color: var(--navy); font-weight: 700; cursor: pointer; text-decoration: underline; font-size: inherit; }
 
-  /* ---------- dialog ---------- */
+  /* ---------- ダイアログ（スマホでは下からのシート） ---------- */
   dialog {
-    border: 0; padding: 0; border-radius: 18px; background: var(--surface); color: var(--text);
-    width: min(640px, calc(100vw - 16px)); max-height: calc(100dvh - 24px); box-shadow: 0 20px 60px rgba(0,0,0,.3);
+    border: 0; padding: 0; border-radius: 20px; background: var(--surface); color: var(--text);
+    width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); box-shadow: 0 24px 64px rgba(27, 42, 78, .28);
   }
-  dialog::backdrop { background: rgba(20, 15, 10, .45); }
-  .dlg { display: flex; flex-direction: column; max-height: calc(100dvh - 24px); }
-  .dlg-head { padding: 16px 18px 8px; display: flex; justify-content: space-between; align-items: center; }
-  .dlg-head h2 { margin: 0; font-size: 17px; }
-  .dlg-body { padding: 4px 18px 16px; overflow-y: auto; display: grid; gap: 16px; }
-  .dlg-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
-  .field > label, .field > .label { display: block; font-size: 13px; font-weight: 700; margin-bottom: 6px; }
-  .field .req { color: var(--accent); }
-  .field .help { font-size: 12.5px; color: var(--muted); margin-top: 5px; }
-  .field .help.ok { color: var(--ok); }
-  .field .help.warn { color: var(--warn); }
+  dialog::backdrop { background: rgba(27, 42, 78, .45); }
+  @media (max-width: 640px) {
+    dialog { width: 100vw; max-width: 100vw; margin: auto 0 0; border-radius: 20px 20px 0 0; max-height: 94dvh; }
+  }
+  .dlg { display: flex; flex-direction: column; max-height: inherit; }
+  .dlg-head { padding: 14px 12px 6px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+  .dlg-head h2 { margin: 0; font-size: 18px; }
+  .dlg-body { padding: 18px 20px 20px; overflow-y: auto; display: grid; gap: 20px; overscroll-behavior: contain; }
+  .dlg-foot {
+    padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border);
+    display: flex; gap: 8px; background: var(--surface);
+  }
+  .dlg-foot .spacer { flex: 1; }
+  .dlg-foot .btn.primary { min-width: 120px; }
+  .section-title { margin: 4px 0 -8px; font-size: 13px; font-weight: 800; color: var(--muted); letter-spacing: .04em; }
+  .field > label, .field > .label { display: block; font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+  .field .req { color: var(--danger); font-size: 12px; margin-left: 4px; }
+  .field .help { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .field .help.ok { color: #1f6f43; }
+  .field .help.warn { color: #9a5b00; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 520px) { .two { grid-template-columns: 1fr; } }
-  .geo-row { display: flex; gap: 6px; }
+  .geo-row { display: flex; gap: 8px; }
   .geo-row input { flex: 1; }
-  .geo-results { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+  .geo-results { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
   .geo-results button {
-    width: 100%; text-align: left; border: 1px solid var(--border); background: var(--surface-2); border-radius: 8px;
-    padding: 6px 10px; font-size: 13px; cursor: pointer;
+    width: 100%; min-height: 44px; text-align: left; border: 1.5px solid var(--border); background: var(--surface); border-radius: 10px;
+    padding: 8px 12px; font-size: 14px; cursor: pointer;
   }
-  .geo-results button:hover { border-color: var(--accent); }
-  .check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; }
-  .check input { width: 18px; height: 18px; accent-color: var(--ok); }
-  .choose { padding: 20px; }
-  .choose h2 { margin: 0 0 8px; font-size: 17px; }
-  .choose p { margin: 0 0 18px; white-space: pre-line; color: var(--muted); font-size: 14px; }
+  .geo-results button:hover { border-color: var(--navy); }
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 4px 14px; border: 1.5px solid var(--border); border-radius: 12px; cursor: pointer; font-weight: 700; }
+  .switch input { appearance: none; width: 48px; height: 28px; border-radius: 99px; background: var(--border); position: relative; cursor: pointer; transition: background .15s; flex-shrink: 0; }
+  .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .15s; }
+  .switch input:checked { background: var(--navy); }
+  .switch input:checked::after { left: 23px; }
+  .choose { padding: 22px 20px calc(18px + env(safe-area-inset-bottom)); }
+  .choose h2 { margin: 0 0 8px; font-size: 18px; }
+  .choose p { margin: 0 0 20px; white-space: pre-line; color: var(--muted); font-size: 14.5px; }
   .choose-btns { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+  @media (max-width: 640px) { .choose-btns { flex-direction: column-reverse; } .choose-btns .btn { width: 100%; } }
+  .btn.danger-fill { background: var(--danger); border-color: var(--danger); color: #fff; }
 
   /* ---------- toast ---------- */
   #toast {
-    position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(10px);
-    background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px;
+    position: fixed; left: 50%; bottom: calc(var(--bar-h) + 16px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(10px);
+    background: var(--navy); color: #fff; padding: 12px 18px; border-radius: 12px; font-size: 14.5px;
     opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 2000; max-width: calc(100vw - 32px);
+    box-shadow: 0 8px 24px rgba(27, 42, 78, .25);
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-  /* ---------- gate (login) ---------- */
-  .gate { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
+
+  /* ---------- ログイン前 ---------- */
+  .gate { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: var(--surface-2); }
   .gate-card {
-    width: min(420px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
-    padding: 32px 24px 24px; box-shadow: var(--shadow); text-align: center; display: grid; gap: 14px;
+    width: min(420px, 100%); background: var(--surface); border-radius: 24px;
+    padding: 36px 24px 28px; box-shadow: 0 8px 32px rgba(27, 42, 78, .08); text-align: center; display: grid; gap: 16px;
   }
   .gate-logo {
-    width: 56px; height: 56px; border-radius: 50%; background: var(--accent); color: var(--accent-ink);
-    display: grid; place-items: center; font-size: 26px; font-weight: 700; margin: 0 auto;
+    width: 64px; height: 64px; border-radius: 20px; background: var(--accent); color: var(--navy);
+    display: grid; place-items: center; font-size: 30px; font-weight: 800; margin: 0 auto;
   }
-  .gate-card h1 { font-size: 20px; margin: 0; }
+  .gate-card h1 { font-size: 21px; margin: 0; }
   #gateBody { display: grid; gap: 14px; }
-  #gateBody p { margin: 0; color: var(--muted); font-size: 14px; }
-  .btn.big { padding: 12px 16px; font-size: 15px; width: 100%; }
-  .gate-err, .gate-info { font-size: 13.5px; text-align: left; border-radius: 10px; padding: 10px 12px; }
-  .gate-err { color: var(--danger); background: var(--surface-2); }
-  .gate-info { color: var(--ok); background: var(--ok-soft); }
+  #gateBody p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .gate-err, .gate-info { font-size: 14px; text-align: left; border-radius: 12px; padding: 12px 14px; line-height: 1.6; }
+  .gate-err { color: var(--danger); background: #fdecec; }
+  .gate-info { color: var(--navy); background: var(--accent-soft); }
   .gate-loading { padding: 16px 0; }
-  .net { font-size: 12px; color: var(--warn); margin-left: 8px; font-weight: 600; }
-  .card .by { margin-left: 2px; }
-  .member { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 14.5px; }
-  .avatar {
-    width: 32px; height: 32px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-soft-ink);
-    display: grid; place-items: center; font-weight: 700; flex-shrink: 0;
-  }
-  #inviteUrl { font-size: 13px; color: var(--muted); }
-  .member .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
-  .member.req { border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; margin-top: 6px; background: var(--surface-2); }
-  .panel h3.sub { font-size: 14px; margin: 14px 0 4px; }
-  .linkbtn { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 700; cursor: pointer; text-decoration: underline; font-size: inherit; }
-  .req-banner {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px;
-    background: var(--accent-soft); color: var(--accent-soft-ink); border-radius: var(--radius); padding: 10px 12px; font-size: 14px; font-weight: 600;
-  }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
@@ -336,18 +362,23 @@
 
 <div id="app" hidden>
 <header class="app-header">
-  <div class="wrap">
-    <div class="bar">
-      <h1>ふたりの行きたいお店<span class="net" id="netStatus" hidden>オフライン（つながると自動で送信）</span></h1>
-      <span class="count" id="headerCount"></span>
+  <div class="wrap bar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">食</span>
+      <div style="min-width:0">
+        <h1>ふたりの行きたいお店</h1>
+        <span class="net" id="netStatus" hidden>オフライン（つながると自動で送信）</span>
+      </div>
     </div>
-    <nav class="tabs" role="tablist">
-      <button role="tab" data-tab="list" aria-selected="true">お店一覧</button>
-      <button role="tab" data-tab="map" aria-selected="false">マップ</button>
-      <button role="tab" data-tab="settings" aria-selected="false">設定・共有</button>
-    </nav>
+    <span class="count" id="headerCount"></span>
+    <button class="icon-btn" data-tab="settings" aria-label="設定・共有" aria-selected="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="dot" id="settingsDot" hidden></span></button>
   </div>
 </header>
+<nav class="tabbar" role="tablist" aria-label="メインメニュー">
+  <button role="tab" data-tab="list" aria-selected="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg><span>一覧</span></button>
+  <button class="tab-add" id="addBtn" aria-label="お店を追加"><span class="plus"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">お店を追加</span></span></button>
+  <button role="tab" data-tab="map" aria-selected="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><span>マップ</span></button>
+</nav>
 
 <main class="wrap">
   <!-- 検索・絞り込み（一覧とマップで共通） -->
@@ -357,30 +388,28 @@
   </div>
   <section class="filters" id="filters" aria-label="検索・絞り込み">
     <div class="filter-top">
-      <input type="search" id="q" placeholder="店名・エリア・メモで検索" autocomplete="off">
-      <button class="btn" id="filterToggle" aria-expanded="true">絞り込み <span class="badge" id="filterBadge"></span></button>
+      <label class="search"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input type="search" id="q" placeholder="キーワードで検索" autocomplete="off" aria-label="店名・エリア・メモ・タグで検索"></label>
+      <button class="btn" id="filterToggle" aria-expanded="false" aria-controls="filterBody"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span>絞り込み</span><span class="badge" id="filterBadge"></span></button>
     </div>
-    <div class="filter-body" id="filterBody">
-      <div class="frow">
-        <span class="flabel">状態</span>
-        <div><div class="seg" id="statusSeg">
-          <button data-status="all" aria-pressed="true">すべて</button>
-          <button data-status="want" aria-pressed="false">行きたい</button>
-          <button data-status="visited" aria-pressed="false">行った</button>
-        </div></div>
-      </div>
-      <div class="frow"><span class="flabel">エリア</span><div class="chips" id="fArea"></div></div>
-      <div class="frow"><span class="flabel">ジャンル</span><div class="chips" id="fGenre"></div></div>
-      <div class="frow"><span class="flabel">雰囲気</span><div class="chips" id="fMood"></div></div>
+    <div class="seg" id="statusSeg" role="group" aria-label="状態">
+      <button data-status="all" aria-pressed="true">すべて</button>
+      <button data-status="want" aria-pressed="false">行きたい</button>
+      <button data-status="visited" aria-pressed="false">行った</button>
+    </div>
+    <div class="active-filters" id="activeFilters"></div>
+    <div class="filter-body" id="filterBody" hidden>
+      <div class="fgroup"><h3>エリア</h3><div class="chips" id="fArea"></div></div>
+      <div class="fgroup"><h3>ジャンル</h3><div class="chips" id="fGenre"></div></div>
+      <div class="fgroup"><h3>雰囲気</h3><div class="chips" id="fMood"></div></div>
       <div class="ffoot">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="display:grid;gap:6px">
           <span class="hint">ジャンル・雰囲気を複数選んだとき</span>
           <div class="seg" id="matchSeg">
             <button data-match="any" aria-pressed="true">どれかに一致</button>
             <button data-match="all" aria-pressed="false">すべて一致</button>
           </div>
         </div>
-        <button class="btn sm ghost" id="clearFilters">条件をクリア</button>
+        <button class="btn sm" id="clearFilters">条件をクリア</button>
       </div>
     </div>
   </section>
@@ -405,8 +434,8 @@
     <div class="map-head">
       <span id="mapCount"></span>
       <div class="legend">
-        <span><i style="background:#d2553a"></i>行きたい</span>
-        <span><i style="background:#2f8a58"></i>行った</span>
+        <span><i class="want"></i>行きたい</span>
+        <span><i class="went"></i>行った</span>
         <span class="provider" id="mapProvider"></span>
       </div>
     </div>
@@ -491,7 +520,6 @@
   </section>
 </main>
 
-<button class="fab" id="addBtn">＋ お店を追加</button>
 </div>
 
 <!-- お店の追加・編集 -->
@@ -499,36 +527,37 @@
   <form class="dlg" id="shopForm" novalidate>
     <div class="dlg-head">
       <h2 id="shopDialogTitle">お店を追加</h2>
-      <button type="button" class="btn sm ghost" data-action="close-shop" aria-label="閉じる">✕</button>
+      <button type="button" class="icon-btn" data-action="close-shop" aria-label="閉じる"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="dlg-body">
       <div class="field">
-        <label for="fName">店名 <span class="req">*</span></label>
-        <input type="text" id="fName" required maxlength="200" autocomplete="off">
+        <label for="fGmap">Google マップのリンク</label>
+        <input type="url" id="fGmap" placeholder="https://www.google.com/maps/place/..." autocomplete="off" inputmode="url">
+        <div class="help">貼り付けると、店名と位置が自動で入ります。</div>
+      </div>
+      <div class="field">
+        <label for="fName">店名<span class="req">必須</span></label>
+        <input type="text" id="fName" required maxlength="200" autocomplete="off" enterkeyhint="next">
       </div>
       <div class="field">
         <label for="fAreaInput">エリア</label>
-        <input type="text" id="fAreaInput" list="areaList" placeholder="例: 恵比寿、梅田" autocomplete="off">
+        <input type="text" id="fAreaInput" list="areaList" placeholder="例: 恵比寿、梅田" autocomplete="off" enterkeyhint="next">
         <datalist id="areaList"></datalist>
       </div>
       <div class="field">
         <span class="label">ジャンル</span>
         <div class="chips" id="formGenres"></div>
-        <div class="add-row"><input type="text" id="formGenreNew" placeholder="ないジャンルを追加"><button type="button" class="btn sm" data-action="form-add" data-kind="genres">追加</button></div>
+        <div class="add-row"><input type="text" id="formGenreNew" placeholder="ほかのジャンルを追加" enterkeyhint="done"><button type="button" class="btn" data-action="form-add" data-kind="genres">追加</button></div>
       </div>
       <div class="field">
         <span class="label">雰囲気</span>
         <div class="chips" id="formMoods"></div>
-        <div class="add-row"><input type="text" id="formMoodNew" placeholder="ない雰囲気を追加"><button type="button" class="btn sm" data-action="form-add" data-kind="moods">追加</button></div>
-      </div>
-      <div class="field">
-        <label for="fGmap">Google マップのリンク</label>
-        <input type="url" id="fGmap" placeholder="https://www.google.com/maps/place/..." autocomplete="off">
+        <div class="add-row"><input type="text" id="formMoodNew" placeholder="ほかの雰囲気を追加" enterkeyhint="done"><button type="button" class="btn" data-action="form-add" data-kind="moods">追加</button></div>
       </div>
       <div class="two">
         <div class="field">
           <label for="fTabelog">食べログのリンク</label>
-          <input type="url" id="fTabelog" placeholder="https://tabelog.com/..." autocomplete="off">
+          <input type="url" id="fTabelog" placeholder="https://tabelog.com/..." autocomplete="off" inputmode="url">
         </div>
         <div class="field">
           <label for="fInsta">Instagram</label>
@@ -538,10 +567,10 @@
       <div class="field">
         <label for="fCoords">マップ上の位置（緯度, 経度）</label>
         <input type="text" id="fCoords" placeholder="例: 35.6467, 139.7101" inputmode="decimal" autocomplete="off">
-        <div class="help" id="coordHint">Google マップのURLに座標が含まれていれば自動で入ります。Google マップで地点を右クリック → 座標をクリックでコピーして貼り付けもできます。</div>
+        <div class="help" id="coordHint">Google マップのリンクに座標が含まれていれば自動で入ります。</div>
         <div class="geo-row" style="margin-top:8px">
-          <input type="text" id="geoQuery" placeholder="店名や住所で位置を検索" autocomplete="off">
-          <button type="button" class="btn sm" data-action="geocode">検索</button>
+          <input type="text" id="geoQuery" placeholder="店名や住所で位置を検索" autocomplete="off" enterkeyhint="search">
+          <button type="button" class="btn" data-action="geocode">検索</button>
         </div>
         <ul class="geo-results" id="geoResults"></ul>
       </div>
@@ -549,9 +578,11 @@
         <label for="fMemo">メモ</label>
         <textarea id="fMemo" placeholder="おすすめメニュー、予約の要否、行きたい理由など"></textarea>
       </div>
-      <label class="check"><input type="checkbox" id="fVisited"> もう行った</label>
+      <label class="switch">もう行った<input type="checkbox" id="fVisited" role="switch"></label>
     </div>
     <div class="dlg-foot">
+      <button type="button" class="btn ghost danger" id="formDelete" data-action="delete-current" hidden>削除</button>
+      <span class="spacer"></span>
       <button type="button" class="btn" data-action="close-shop">キャンセル</button>
       <button type="submit" class="btn primary">保存</button>
     </div>
@@ -727,7 +758,7 @@ const session = { user: null, spaceId: null, space: null, loaded: false, unsubs:
 const ui = {
   tab: 'list', q: '', status: 'all', match: 'any', sort: lsGet('futari-sort') || 'new',
   areas: new Set(), genres: new Set(), moods: new Set(),
-  filtersOpen: window.innerWidth > 760,
+  filtersOpen: false,
 };
 
 /* =========================================================
@@ -989,7 +1020,7 @@ async function rejectRequest(id) {
   const ok = await choose({
     title: `${r?.name || '申請者'}さんの申請を拒否しますか？`,
     message: '拒否すると招待リンクも作り直され、今までのリンクは使えなくなります。',
-    buttons: [{ label: 'キャンセル', value: null }, { label: '拒否する', value: true, kind: 'danger' }],
+    buttons: [{ label: 'キャンセル', value: null }, { label: '拒否する', value: true, kind: 'danger-fill' }],
   });
   if (!ok) return;
   try {
@@ -1013,7 +1044,7 @@ async function removeMember(id) {
   const ok = await choose({
     title: `${memberName(id) || 'メンバー'}さんをリストから外しますか？`,
     message: '外した人はリストを見られなくなります。登録済みのお店は残ります。招待リンクも作り直されます。',
-    buttons: [{ label: 'キャンセル', value: null }, { label: '外す', value: true, kind: 'danger' }],
+    buttons: [{ label: 'キャンセル', value: null }, { label: '外す', value: true, kind: 'danger-fill' }],
   });
   if (!ok) return;
   fb.updateDoc(spaceRef(), {
@@ -1175,7 +1206,7 @@ function sorted(list) {
   return [...list].sort(by);
 }
 function activeFilterCount() {
-  return ui.areas.size + ui.genres.size + ui.moods.size + (ui.status !== 'all' ? 1 : 0);
+  return ui.areas.size + ui.genres.size + ui.moods.size;
 }
 const memberName = id => session.space?.memberInfo?.[id]?.name || '';
 
@@ -1190,12 +1221,12 @@ function render() {
   const reqCount = isOwner() ? session.requests.length : 0;
   $('#requestBanner').hidden = !reqCount || ui.tab === 'settings';
   $('#requestBannerText').textContent = reqCount ? `${session.requests[0].name || '誰か'}さん${reqCount > 1 ? ` ほか${reqCount - 1}人` : ''}から参加申請が届いています。` : '';
-  $$('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === ui.tab)));
+  $('#settingsDot').hidden = !reqCount;
+  $$('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === ui.tab)));
   $('#tab-list').hidden = ui.tab !== 'list';
   $('#tab-map').hidden = ui.tab !== 'map';
   $('#tab-settings').hidden = ui.tab !== 'settings';
   $('#filters').hidden = ui.tab === 'settings';
-  $('#addBtn').hidden = ui.tab === 'settings';
 
   if (ui.tab !== 'settings') renderFilters();
   if (ui.tab === 'list') renderList();
@@ -1218,6 +1249,14 @@ function renderFilters() {
   $('#filterBadge').textContent = activeFilterCount() || '';
   $$('#statusSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.status === ui.status)));
   $$('#matchSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.match === ui.match)));
+  // 適用中の条件を、検索欄の下に外せるチップで表示
+  const active = [
+    ...[...ui.areas].map(v => ['areas', v]), ...[...ui.genres].map(v => ['genres', v]), ...[...ui.moods].map(v => ['moods', v]),
+  ];
+  $('#activeFilters').innerHTML = active.length
+    ? active.map(([k, v]) => `<button type="button" class="chip on" data-filter="${k}" data-val="${esc(v)}" aria-label="${esc(v)}の条件を外す">${esc(v)}<span class="x" aria-hidden="true">×</span></button>`).join('')
+      + '<button type="button" class="linkbtn small" data-action="clear-filters" style="margin-left:4px">すべて解除</button>'
+    : '';
 
   const areaCounts = countBy(db.shops.map(s => s.area || NO_AREA));
   const areas = Object.keys(areaCounts).sort((a, b) => a === NO_AREA ? 1 : b === NO_AREA ? -1 : a.localeCompare(b, 'ja'));
@@ -1231,9 +1270,10 @@ function renderFilters() {
 }
 
 function linksHTML(s) {
-  const out = [`<a class="lk lk-g" href="${esc(gmapHref(s))}" target="_blank" rel="noopener noreferrer">Google マップ</a>`];
-  if (s.tabelog) out.push(`<a class="lk lk-t" href="${esc(s.tabelog)}" target="_blank" rel="noopener noreferrer">食べログ</a>`);
-  if (s.insta) out.push(`<a class="lk lk-i" href="${esc(s.insta)}" target="_blank" rel="noopener noreferrer">Instagram</a>`);
+  const a = (href, label) => `<a class="lk" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${label}<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>`;
+  const out = [a(gmapHref(s), 'Google マップ')];
+  if (s.tabelog) out.push(a(s.tabelog, '食べログ'));
+  if (s.insta) out.push(a(s.insta, 'Instagram'));
   return out.join('');
 }
 function cardHTML(s) {
@@ -1248,7 +1288,7 @@ function cardHTML(s) {
         <h3>${esc(s.name)}</h3>
         <div class="area">${esc(s.area || NO_AREA)}${by ? `<span class="by">・${esc(by)}が追加</span>` : ''}</div>
       </div>
-      <button class="visit${s.visited ? ' on' : ''}" data-action="toggle-visited" data-id="${esc(s.id)}" title="クリックで切り替え">${s.visited ? '✓ 行った' : '行きたい'}</button>
+      <button class="visit${s.visited ? ' on' : ''}" data-action="toggle-visited" data-id="${esc(s.id)}" aria-pressed="${s.visited}" aria-label="${s.visited ? '行った（押すと行きたいに戻す）' : '行きたい（押すと行ったにする）'}">${s.visited ? '✓ 行った' : '行きたい'}</button>
     </div>
     ${tags ? `<div class="tags">${tags}</div>` : ''}
     ${s.memo ? `<p class="memo">${esc(s.memo)}</p>` : ''}
@@ -1256,7 +1296,6 @@ function cardHTML(s) {
     <div class="card-foot">
       ${hasPos(s) ? `<button class="btn sm" data-action="show-on-map" data-id="${esc(s.id)}">地図で見る</button>` : `<span class="nopos">位置未設定</span>`}
       <button class="btn sm" data-edit="${esc(s.id)}">編集</button>
-      <button class="btn sm" data-action="delete" data-id="${esc(s.id)}">削除</button>
     </div>
   </article>`;
 }
@@ -1432,7 +1471,7 @@ const MapView = {
     for (const s of pts) {
       if (this.kind === 'google') {
         const pin = new google.maps.marker.PinElement({
-          background: s.visited ? '#2f8a58' : '#d2553a', borderColor: '#ffffff', glyphColor: '#ffffff',
+          background: s.visited ? '#1b2a4e' : '#fabe00', borderColor: s.visited ? '#ffffff' : '#1b2a4e', glyphColor: s.visited ? '#ffffff' : '#1b2a4e',
         });
         const m = new google.maps.marker.AdvancedMarkerElement({
           map: this.map, position: { lat: s.lat, lng: s.lng }, title: s.name, content: pin.element,
@@ -1535,7 +1574,7 @@ function setCoordHint(text, cls = '') {
   h.textContent = text;
   h.className = 'help' + (cls ? ' ' + cls : '');
 }
-const DEFAULT_COORD_HINT = 'Google マップのURLに座標が含まれていれば自動で入ります。Google マップで地点を右クリック → 座標をクリックでコピーして貼り付けもできます。';
+const DEFAULT_COORD_HINT = 'Google マップのリンクに座標が含まれていれば自動で入ります。下の検索か、Google マップで地点を右クリックしてコピーした座標の貼り付けでも設定できます。';
 
 function openShopForm(id = null) {
   editingId = id;
@@ -1560,6 +1599,7 @@ function openShopForm(id = null) {
   setCoordHint(DEFAULT_COORD_HINT);
   $('#areaList').innerHTML = uniq(db.shops.map(x => x.area)).map(a => `<option value="${esc(a)}">`).join('');
   renderFormChips();
+  $('#formDelete').hidden = !s;
   $('#shopDialog').showModal();
   $('#shopForm .dlg-body').scrollTop = 0;
   if (!s) $('#fName').focus();
@@ -1750,7 +1790,7 @@ $('#wipe').addEventListener('click', async () => {
   const ok = await choose({
     title: 'すべてのお店を削除しますか？',
     message: 'ふたりのリストが空になり、相手の画面からも消えます。元に戻せないので、必要なら先にJSONを書き出してください。',
-    buttons: [{ label: 'キャンセル', value: null }, { label: '削除する', value: true, kind: 'danger' }],
+    buttons: [{ label: 'キャンセル', value: null }, { label: '削除する', value: true, kind: 'danger-fill' }],
   });
   if (!ok) return;
   try {
@@ -1776,7 +1816,7 @@ async function removeMaster(kind, v) {
       buttons: [
         { label: 'キャンセル', value: null },
         { label: '選択肢からだけ削除', value: 'master' },
-        { label: 'お店からも外す', value: 'all', kind: 'danger' },
+        { label: 'お店からも外す', value: 'all', kind: 'danger-fill' },
       ],
     });
     if (!r) return;
@@ -1827,7 +1867,6 @@ function clearFilters(doRender = true) {
   if (doRender) render();
 }
 
-$$('.tabs button').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 $('#addBtn').addEventListener('click', () => openShopForm());
 $('#filterToggle').addEventListener('click', () => { ui.filtersOpen = !ui.filtersOpen; renderFilters(); if (ui.tab === 'map') MapView.resize(); });
 $('#clearFilters').addEventListener('click', () => clearFilters());
@@ -1869,6 +1908,8 @@ document.addEventListener('click', async e => {
     render();
     return;
   }
+  const tb = e.target.closest('[data-tab]');
+  if (tb) { switchTab(tb.dataset.tab); return; }
   const ed = e.target.closest('[data-edit]');
   if (ed) { openShopForm(ed.dataset.edit); return; }
 
@@ -1898,16 +1939,17 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'show-on-map': switchTab('map', id); break;
-    case 'delete': {
-      const s = db.shops.find(x => x.id === id);
+    case 'delete-current': {
+      const s = db.shops.find(x => x.id === editingId);
       if (!s) break;
       const ok = await choose({
         title: `「${s.name}」を削除しますか？`,
         message: '相手の画面からも消えます。',
-        buttons: [{ label: 'キャンセル', value: null }, { label: '削除する', value: true, kind: 'danger' }],
+        buttons: [{ label: 'キャンセル', value: null }, { label: '削除する', value: true, kind: 'danger-fill' }],
       });
       if (!ok) break;
-      removeShop(id);
+      removeShop(s.id);
+      $('#shopDialog').close();
       toast('削除しました');
       break;
     }
