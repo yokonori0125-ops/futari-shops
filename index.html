@@ -21,6 +21,7 @@
 <!-- 食べログの情報・画像の取得先へ先に接続しておく（初回の待ち時間を短縮） -->
 <link rel="preconnect" href="https://api.microlink.io" crossorigin>
 <link rel="preconnect" href="https://tblg.k-img.com">
+<link rel="preconnect" href="https://r.jina.ai" crossorigin>
 <link rel="dns-prefetch" href="https://api.allorigins.win">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400..800&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
@@ -296,6 +297,9 @@
   .img-preview img { width: 120px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; background: var(--surface-2); flex-shrink: 0; }
   .img-preview .grow { flex: 1; display: grid; gap: 6px; justify-items: start; }
   .img-preview .ok-note { color: var(--ok-ink); }
+  .img-preview .diag { font-size: 12.5px; }
+  .img-preview .diag summary { cursor: pointer; color: var(--navy-2); }
+  .img-preview .diag ul { margin: 6px 0 0; padding-left: 18px; }
   /* 食べログの評価 */
   .rating { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); margin-top: 2px; }
   .rating .stars {
@@ -1992,37 +1996,52 @@ function parseRating(v) {
 }
 function infoFromHtml(html) {
   const doc = new DOMParser().parseFromString(html || '', 'text/html');
-  let rating = null;
-  // 構造化データ（aggregateRating）→ 画面上の点数表示 の順に探す
+  const meta = sel => doc.querySelector(sel)?.content || '';
+  let rating = null, cuisine = '';
+  // 構造化データ（aggregateRating・servesCuisine）
   for (const sc of doc.querySelectorAll('script[type="application/ld+json"]')) {
     try {
       const j = JSON.parse(sc.textContent);
       for (const o of [].concat(j, j?.['@graph'] || [])) {
-        rating = parseRating(o?.aggregateRating?.ratingValue);
-        if (rating) break;
+        rating = rating || parseRating(o?.aggregateRating?.ratingValue);
+        if (!cuisine && o?.servesCuisine) cuisine = [].concat(o.servesCuisine).join('、');
       }
     } catch {}
-    if (rating) break;
   }
   if (!rating) rating = parseRating(doc.querySelector(RATING_SELECTOR)?.textContent);
-  const title = doc.querySelector('meta[property="og:title"]')?.content || doc.title || '';
-  let cuisine = '';
-  for (const sc of doc.querySelectorAll('script[type="application/ld+json"]')) {
-    try {
-      const j = JSON.parse(sc.textContent);
-      for (const o of [].concat(j, j?.['@graph'] || [])) if (o?.servesCuisine) { cuisine = [].concat(o.servesCuisine).join('、'); break; }
-    } catch {}
-    if (cuisine) break;
-  }
-  return { image: doc.querySelector('meta[property="og:image"]')?.content || '', rating, title, cuisine };
+  return {
+    image: meta('meta[property="og:image"]'),
+    rating,
+    title: doc.title || meta('meta[property="og:title"]'),
+    altTitle: meta('meta[property="og:title"]'),
+    description: meta('meta[name="description"]') || meta('meta[property="og:description"]'),
+    cuisine,
+  };
 }
-// 食べログのページタイトル「店名 (最寄駅/ジャンル1、ジャンル2) - 食べログ」から店名とカテゴリを取り出す
-function parseTabelogTitle(title) {
-  const m = String(title || '').match(/^(.*?)\s*[(（]([^()（）]*)[)）]\s*[-－–―]\s*食べログ/);
-  if (!m) return { name: '', genres: [] };
+// 食べログの「店名 (最寄駅/ジャンル1、ジャンル2)」という表記から店名とカテゴリを取り出す。
+// ページタイトル（… - 食べログ）・og:title・説明文（…の店舗情報は食べログでチェック）のどれでも読めるようにする
+function parseTabelogTitle(text) {
+  const str = String(text || '');
+  const m = str.match(/^(.*?)\s*[(（]([^()（）]*[/／][^()（）]*)[)）]/);
+  if (!m) {
+    // 「店名 - 最寄駅/ジャンル [食べログ]」のような表記
+    const m2 = str.match(/^(.*?)\s+[-－–―]\s+([^\[\]]*[/／][^\[\]]*?)\s*[\[［|｜]\s*食べログ/);
+    if (!m2) return { name: '', genres: [] };
+    const inner2 = m2[2];
+    const s2 = Math.max(inner2.lastIndexOf('/'), inner2.lastIndexOf('／'));
+    return { name: m2[1].trim(), genres: splitCategories(inner2.slice(s2 + 1)) };
+  }
   const inner = m[2];
   const slash = Math.max(inner.lastIndexOf('/'), inner.lastIndexOf('／'));
-  return { name: m[1].trim(), genres: splitCategories(slash >= 0 ? inner.slice(slash + 1) : '') };
+  return { name: m[1].trim(), genres: splitCategories(inner.slice(slash + 1)) };
+}
+// 取得結果の中から、店名とカテゴリを読める表記を探す
+function titleInfo(p) {
+  for (const t of [p?.title, p?.altTitle, p?.description]) {
+    const r = parseTabelogTitle(t);
+    if (r.genres.length) return r;
+  }
+  return { name: '', genres: splitCategories(p?.cuisine) };
 }
 const splitCategories = str => uniq(String(str || '').split(/[、,，]/));
 // 食べログのカテゴリを、このアプリのジャンルにそろえる（対応が無ければカテゴリ名のまま使う）
@@ -2059,11 +2078,11 @@ function mapTabelogGenres(cats) {
    4) 結果は端末にも7日間保存し、同じURLは通信しない。取得中の同じURLは1回にまとめる */
 const INFO_LS_KEY = 'futari-tabelog-cache-v2';
 lsDel('futari-tabelog-cache'); // 旧版で保存された（空の結果を含む）キャッシュは捨てる
-const ML_MODE_KEY = 'futari-microlink-mode';
+lsDel('futari-microlink-mode');
+const ML_BLOCK_KEY = 'futari-microlink-blocked-until';
 const HEDGE_MS = 2500;
 const infoCache = new Map();  // URL → 取得結果
 const inflight = new Map();   // URL → 取得中の { first, full }
-const wait = ms => new Promise(r => setTimeout(r, ms));
 function lsInfo(url, value) {
   try {
     const all = JSON.parse(lsGet(INFO_LS_KEY) || '{}');
@@ -2074,39 +2093,91 @@ function lsInfo(url, value) {
     lsSet(INFO_LS_KEY, JSON.stringify(all));
   } catch { return null; }
 }
-async function getWithTimeout(url, ms, as = 'json') {
-  const r = await fetch(url, { signal: AbortSignal.timeout(ms) });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+// 取得失敗の理由（画面に表示して原因を特定できるようにする）
+class FetchError extends Error {}
+async function request(url, ms, { as = 'json', headers } = {}) {
+  let r;
+  try { r = await fetch(url, { headers, signal: AbortSignal.timeout(ms) }); }
+  catch (e) { throw new FetchError(e?.name === 'TimeoutError' ? `${ms / 1000}秒で応答なし` : '接続できない（通信エラー・CORS）'); }
+  if (!r.ok) {
+    let detail = '';
+    try { const j = await r.clone().json(); detail = j?.code || j?.message || ''; } catch {}
+    const e = new FetchError(r.status === 429 ? '利用回数の上限に達した（429）' : `HTTP ${r.status}${detail ? ` ${detail}` : ''}`);
+    e.status = r.status;
+    throw e;
+  }
   return as === 'json' ? r.json() : r.text();
 }
-// render=false：ページを描画せずにHTMLだけ読む（速い）／true：ブラウザで描画して読む（遅いが確実）
+const microlinkBlocked = () => Number(lsGet(ML_BLOCK_KEY) || 0) > Date.now();
+// render=false：ページを描画せずにHTMLだけ読む（速い）／true：ブラウザで描画して読む（遅い）
 async function viaMicrolink(pageUrl, render = false) {
+  if (microlinkBlocked()) throw new FetchError('1日の利用上限に達したため、しばらく使用を止めています');
   const q = new URLSearchParams({ url: pageUrl, 'data.rating.selector': RATING_SELECTOR, 'data.rating.attr': 'text' });
   if (!render) q.set('prerender', 'false');
-  const j = await getWithTimeout(`https://api.microlink.io/?${q}`, render ? 20000 : 10000);
-  if (j?.status !== 'success') throw new Error(`microlink: ${j?.status}`);
-  return { image: j.data?.image?.url || '', rating: parseRating(j.data?.rating), title: j.data?.title || '', cuisine: '' };
+  let j;
+  try { j = await request(`https://api.microlink.io/?${q}`, render ? 20000 : 10000); }
+  catch (e) {
+    if (e.status === 429) lsSet(ML_BLOCK_KEY, String(Date.now() + 6 * 60 * 60 * 1000)); // 上限に達したら6時間は使わない
+    throw e;
+  }
+  if (j?.status !== 'success') throw new FetchError(`失敗（${j?.code || j?.status || '不明'}）`);
+  const d = j.data || {};
+  return { image: d.image?.url || '', rating: parseRating(d.rating), title: d.title || '', description: d.description || '', cuisine: '' };
+}
+// Jina Reader：ページをブラウザで開いてHTMLを返すサービス（CORS対応・キー不要）
+async function viaJina(pageUrl) {
+  const html = await request(`https://r.jina.ai/${pageUrl}`, 15000, { as: 'text', headers: { 'X-Return-Format': 'html' } });
+  return infoFromHtml(html);
 }
 async function viaAllOrigins(pageUrl) {
-  const html = await getWithTimeout(`https://api.allorigins.win/raw?url=${encodeURIComponent(pageUrl)}`, 10000, 'text');
-  if (!html) throw new Error('allorigins: empty');
+  const html = await request(`https://api.allorigins.win/raw?url=${encodeURIComponent(pageUrl)}`, 10000, { as: 'text' });
   return infoFromHtml(html);
 }
 // 食べログのお店ページとして読めた結果か（アクセス拒否・エラー画面などの「空の成功」を除外する）
-const isTabelogPage = p => !!p && (parseTabelogTitle(p.title).genres.length > 0 || p.rating != null || splitCategories(p.cuisine).length > 0);
+const isTabelogPage = p => !!p && (
+  titleInfo(p).genres.length > 0 || p.rating != null || /(^|\.)k-img\.com\//.test(String(p.image).replace(/^https?:\/\//, ''))
+);
 // 取得元ごとの結果をまとめて { ok, image, rating, name, genres } にする（お店ページとして読めた結果だけを使う）
 function toInfo(parts) {
   const got = parts.filter(isTabelogPage);
   const pick = f => got.map(p => p[f]).find(v => v != null && v !== '');
-  const t = parseTabelogTitle(got.map(p => p.title).find(x => parseTabelogTitle(x).genres.length) || pick('title') || '');
-  return { ok: got.length > 0, image: safeUrl(pick('image') || ''), rating: pick('rating') ?? null, name: t.name, genres: t.genres.length ? t.genres : splitCategories(pick('cuisine')) };
+  const t = got.map(titleInfo).find(x => x.genres.length) || { name: '', genres: [] };
+  return { ok: got.length > 0, image: safeUrl(pick('image') || ''), rating: pick('rating') ?? null, name: t.name, genres: t.genres };
 }
 const isComplete = i => i.ok && !!i.image && i.rating != null && i.genres.length > 0;
 const isUsable = i => i.ok && (!!i.image || i.genres.length > 0);
-// 描画なしの取得で読めないことが分かったら、しばらくは最初から描画ありで取得する
-const renderFirst = () => { try { const m = JSON.parse(lsGet(ML_MODE_KEY)); return m?.render && Date.now() - m.at < RATING_TTL; } catch { return false; } };
+const describe = r => isTabelogPage(r) ? 'OK' : `食べログのページではない応答（${String(r?.title || 'タイトルなし').slice(0, 30)}）`;
+
+// 取得元を順に試す：前が失敗したらすぐ次へ、2.5秒で返らなければ次も並行して始め、完全な結果がそろった時点で終える
+function runSources(pageUrl, sources, onUsable) {
+  return new Promise(resolve => {
+    const results = [], diags = [];
+    let idx = 0, running = 0, finished = false, timer;
+    const finish = () => { if (!finished) { finished = true; clearTimeout(timer); resolve({ results, diags }); } };
+    const launch = () => {
+      clearTimeout(timer);
+      if (finished) return;
+      if (idx >= sources.length) { if (running === 0) finish(); return; }
+      const src = sources[idx++];
+      running++;
+      src.run(pageUrl)
+        .then(r => { diags.push(`${src.label}: ${describe(r)}`); if (isTabelogPage(r)) results.push(r); else src.onForeign?.(); })
+        .catch(e => diags.push(`${src.label}: ${e instanceof FetchError ? e.message : (e?.message || '失敗')}`))
+        .finally(() => {
+          running--;
+          const info = toInfo(results);
+          if (isUsable(info)) onUsable(info);
+          if (isComplete(info)) return finish();
+          launch();
+        });
+      timer = setTimeout(launch, HEDGE_MS);
+    };
+    launch();
+  });
+}
 
 // 戻り値: { first: すぐ表示できる結果, full: 取れるだけ取った結果 }（fresh=true はキャッシュを使わない）
+// 結果は { ok, image, rating, name, genres, diags }。diags は取得元ごとの成否（失敗時に画面へ表示）
 function fetchTabelogInfo(pageUrl, { fresh = false } = {}) {
   if (!fresh) {
     const c = infoCache.get(pageUrl) || lsInfo(pageUrl);
@@ -2116,33 +2187,19 @@ function fetchTabelogInfo(pageUrl, { fresh = false } = {}) {
   let resolveFirst;
   const first = new Promise(r => { resolveFirst = r; });
   const full = (async () => {
-    const render = renderFirst();
-    let mlDone = false, mlRes = null, aoP = null;
-    const mlP = viaMicrolink(pageUrl, render)
-      .catch(e => { console.warn('microlink failed', e); return null; })
-      .then(r => { mlDone = true; mlRes = r; const i = toInfo([r]); if (isUsable(i)) resolveFirst(i); return r; });
-    await Promise.race([mlP, wait(HEDGE_MS)]);
-    if (!mlDone || !isComplete(toInfo([mlRes]))) {
-      aoP = viaAllOrigins(pageUrl)
-        .catch(e => { console.warn('allorigins failed', e); return null; })
-        .then(r => { const i = toInfo([r]); if (isUsable(i)) resolveFirst(i); return r; });
-    }
-    const runs = [mlP, aoP].filter(Boolean);
-    // どれかが完全な結果を返したら、その時点で確定（残りは待たない）
-    const complete = await new Promise(res => {
-      let left = runs.length;
-      runs.forEach(p => p.then(r => { if (isComplete(toInfo([r]))) res(r); if (--left === 0) res(null); }));
-    });
-    let info = complete ? toInfo([complete]) : toInfo(await Promise.all(runs));
-    // どちらからもお店ページとして読めなかったときは、最後にブラウザ描画ありで取り直す
-    if (!info.ok && !render) {
-      const r = await viaMicrolink(pageUrl, true).catch(e => { console.warn('microlink(render) failed', e); return null; });
-      info = toInfo([r]);
-      if (info.ok) lsSet(ML_MODE_KEY, JSON.stringify({ render: true, at: Date.now() }));
-    }
+    let foreign = false; // 描画なしの取得で、食べログ以外の画面（アクセス拒否など）が返った
+    const sources = [
+      { label: 'Microlink', run: u => viaMicrolink(u), onForeign: () => { foreign = true; } },
+      { label: 'Jina Reader', run: viaJina },
+      { label: 'AllOrigins', run: viaAllOrigins },
+      // 描画なしで食べログ以外の画面が返ったときだけ、最後に描画ありで取り直す（利用回数を節約）
+      { label: 'Microlink（描画あり）', run: u => foreign ? viaMicrolink(u, true) : Promise.reject(new FetchError('不要のため省略')) },
+    ];
+    const { results, diags } = await runSources(pageUrl, sources, i => resolveFirst(i));
+    const info = { ...toInfo(results), diags };
     resolveFirst(info);
     // 読めた結果だけを保存する（読めなかったときは保存せず、次回また取得する）
-    if (info.ok) { infoCache.set(pageUrl, info); lsInfo(pageUrl, info); }
+    if (info.ok) { const { diags: _, ...keep } = info; infoCache.set(pageUrl, keep); lsInfo(pageUrl, keep); }
     return info;
   })().finally(() => inflight.delete(pageUrl));
   const handle = { first, full };
@@ -2161,7 +2218,10 @@ function renderImagePreview() {
   } else if (form.image) {
     el.innerHTML = `<img src="${esc(form.image)}" alt="" referrerpolicy="no-referrer" decoding="async"><div class="grow">${rating}${more}${autoNote}<span>お店の画像を一覧に表示します。</span><button type="button" class="btn sm" data-action="remove-image">画像を表示しない</button></div>`;
   } else if (form.imageState === 'failed') {
-    el.innerHTML = `<span>食べログの情報を取得できませんでした。</span><button type="button" class="btn sm" data-action="refetch-image">もう一度試す</button>`;
+    const diag = (form.diags || []).map(d => `<li>${esc(d)}</li>`).join('');
+    el.innerHTML = `<div class="grow"><span>食べログの情報を取得できませんでした。少し時間をおいて試すか、ジャンル・画像は手動で設定してください。</span>
+      <button type="button" class="btn sm" data-action="refetch-image">もう一度試す</button>
+      ${diag ? `<details class="diag"><summary>詳しい原因</summary><ul>${diag}</ul></details>` : ''}</div>`;
   } else if (rating || form.ratingFrom || autoNote || more) {
     el.innerHTML = `<div class="grow">${rating || more || '<span>食べログの評価はまだありません。</span>'}${autoNote}</div>`;
   } else {
@@ -2213,6 +2273,7 @@ async function fetchFormImage({ applyGenres = false } = {}) {
       if (info.rating != null || final) Object.assign(form, { rating: info.rating ?? (form.ratingFrom === top ? form.rating : null), ratingFrom: top, ratingAt: Date.now() });
     }
     form.imageState = final ? (info.ok ? '' : 'failed') : (info.ok ? 'more' : 'loading');
+    if (final) form.diags = info.diags || [];
     if (final) form.pending = null;
     renderImagePreview();
   };
@@ -2230,7 +2291,7 @@ $('#fTabelog').addEventListener('input', e => {
 });
 // 食べログのリンクがあるのに画像・評価が未取得（または1週間以上前）のお店を、裏で1件ずつ更新する（相手の画面にも反映）
 const imageTried = new Set();
-let bfWorkers = 0;
+let bfWorkers = 0, bfFailures = 0, bfStopped = false;
 const BF_PARALLEL = 3;
 // 食べログの情報で、更新が必要なもの
 const INFO_V = 2;
@@ -2248,14 +2309,20 @@ function backfillNeeds(x) {
 }
 const nextBackfill = () => db.shops.find(x => { const n = backfillNeeds(x); return n && !imageTried.has(x.id + n.top); });
 async function backfillWorker() {
-  for (let s = nextBackfill(); s && session.spaceId; s = nextBackfill()) {
+  for (let s = nextBackfill(); s && session.spaceId && !bfStopped; s = nextBackfill()) {
     const need = backfillNeeds(s);
     const top = need.top;
     imageTried.add(s.id + top); // 取りかかったお店はすぐ印を付け、ほかの処理と重ならないようにする
     // 評価の定期更新・修復は、端末に保存した古い結果を使わずに取り直す
     const fresh = (s.ratingFrom === top && ratingStale(s)) || need.repair;
     const info = await fetchTabelogInfo(top, { fresh }).full;
-    if (!info.ok || !session.spaceId) continue; // お店ページとして読めなければ何も書き込まず、次回の起動時に再挑戦
+    if (!info.ok) {
+      // 続けて読めないときは、取得先の利用回数を使い切らないよう、この起動中の自動取得を止める
+      if (++bfFailures >= 3) { bfStopped = true; console.warn('自動取得を一時停止:', info.diags); }
+      continue; // 何も書き込まず、次回の起動時に再挑戦
+    }
+    bfFailures = 0;
+    if (!session.spaceId) continue;
     const cur = db.shops.find(x => x.id === s.id);
     if (!cur || tabelogTop(cur.tabelog) !== top) continue;
     const upd = { infoV: INFO_V };
@@ -2278,7 +2345,7 @@ async function backfillWorker() {
 }
 // 未取得のお店が増えるたびに呼ばれ、最大3件まで並行して取得する
 function backfillImages() {
-  if (!session.spaceId) return;
+  if (!session.spaceId || bfStopped) return;
   while (bfWorkers < BF_PARALLEL && nextBackfill()) {
     bfWorkers++;
     backfillWorker().finally(() => { bfWorkers--; });
