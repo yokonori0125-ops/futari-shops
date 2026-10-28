@@ -31,33 +31,41 @@ service cloud.firestore {
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.members == [request.auth.uid];
 
-      allow update: if signedIn()
-        && request.resource.data.ownerUid == resource.data.ownerUid
-        && (
-          // メンバー：メンバー構成を変えない更新（選択肢・名前・招待コードなど）
-          (request.auth.uid in resource.data.members
-            && request.resource.data.members == resource.data.members)
-          // 招待リンク：有効な招待コードを添えて、自分を追加する（上限まで）
-          || (!(request.auth.uid in resource.data.members)
-            && resource.data.members.size() < maxMembers()
-            && resource.data.inviteCode is string
-            && resource.data.inviteCode.size() >= 20
-            && request.resource.data.joinCode == resource.data.inviteCode
-            && request.resource.data.members == resource.data.members.concat([request.auth.uid])
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'joinCode']))
-          // 作成者：ほかのメンバーを1人外す（作成者自身は残る）
-          || (request.auth.uid == resource.data.ownerUid
-            && request.auth.uid in request.resource.data.members
-            && resource.data.members.hasAll(request.resource.data.members)
-            && request.resource.data.members.size() == resource.data.members.size() - 1)
-          // 作成者以外のメンバー：自分がリストから抜ける
-          || (request.auth.uid in resource.data.members
-            && request.auth.uid != resource.data.ownerUid
-            && !(request.auth.uid in request.resource.data.members)
-            && resource.data.members.hasAll(request.resource.data.members)
-            && request.resource.data.members.size() == resource.data.members.size() - 1
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'memberInfo']))
-        );
+      allow update: if signedIn() && (
+        (request.resource.data.get('ownerUid', null) == resource.data.get('ownerUid', null)
+          && (
+            // メンバー：メンバー構成を変えない更新（選択肢・名前・招待コードなど）
+            (request.auth.uid in resource.data.members
+              && request.resource.data.members == resource.data.members)
+            // 招待リンク：有効な招待コードを添えて、自分を追加する（上限まで）
+            || (!(request.auth.uid in resource.data.members)
+              && resource.data.members.size() < maxMembers()
+              && resource.data.get('inviteCode', null) is string
+              && resource.data.inviteCode.size() >= 20
+              && request.resource.data.get('joinCode', null) == resource.data.inviteCode
+              && request.resource.data.members == resource.data.members.concat([request.auth.uid])
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'joinCode']))
+            // 作成者：ほかのメンバーを1人外す（作成者自身は残る）
+            || (request.auth.uid == resource.data.get('ownerUid', null)
+              && request.auth.uid in request.resource.data.members
+              && resource.data.members.hasAll(request.resource.data.members)
+              && request.resource.data.members.size() == resource.data.members.size() - 1)
+            // 作成者以外のメンバー：自分がリストから抜ける（最後の1人は抜けられない）
+            || (request.auth.uid in resource.data.members
+              && request.auth.uid != resource.data.get('ownerUid', null)
+              && !(request.auth.uid in request.resource.data.members)
+              && resource.data.members.hasAll(request.resource.data.members)
+              && request.resource.data.members.size() == resource.data.members.size() - 1
+              && request.resource.data.members.size() >= 1
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'memberInfo']))
+          ))
+        // 古い版で作ったリスト（作成者の記録がない）：作成者のアカウントが、自分を作成者として登録する
+        || (resource.data.get('ownerUid', null) == null
+          && isOwnerAccount()
+          && request.auth.uid in resource.data.members
+          && request.resource.data.ownerUid == request.auth.uid
+          && request.resource.data.members == resource.data.members)
+      );
       allow delete: if false;
 
       match /shops/{shopId} {

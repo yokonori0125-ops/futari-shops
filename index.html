@@ -788,6 +788,7 @@
         <div class="note">このリンクを知っている人は誰でも参加して、お店を見たり編集したりできます。送る相手に注意してください。
           <span id="regenNote">リンクが漏れたかもしれないときは <button class="linkbtn" data-action="regen-invite">招待リンクを再発行</button> してください。古いリンクは使えなくなります。</span></div>
       </div>
+      <div class="note" id="inviteMissing" hidden></div>
       <div class="note" id="fullNote" hidden>参加できる上限（10人）に達しています。新しく参加してもらうには、誰かに抜けてもらうか、作成者がメンバーを外してください。</div>
     </div>
 
@@ -1211,6 +1212,8 @@ function stopListening() {
   session.infoSynced = false;
   session.requests = [];
   session.requestsListening = false;
+  session.legacyFixTried = false;
+  session.legacyClaimFailed = false;
   ui.selecting = false;
   ui.selected.clear();
   document.body.classList.remove('selecting');
@@ -1328,6 +1331,19 @@ function enterSpace(id) {
     session.space = d;
     db.genres = Array.isArray(d.genres) ? d.genres : [...DEFAULT_GENRES];
     db.moods = Array.isArray(d.moods) ? d.moods : [...DEFAULT_MOODS];
+    // 古い版で作ったリスト（作成者・招待コードの記録がない）を今の仕組みに合わせる
+    if (!session.legacyFixTried) {
+      session.legacyFixTried = true;
+      const me0 = session.user.uid;
+      if (!d.ownerUid) {
+        // 作成者のアカウントなら作成者として登録（ルール上、作成者のアカウント以外は失敗するので結果は気にしない）
+        fb.updateDoc(spaceRef(), { ownerUid: me0, inviteCode: d.inviteCode || randomCode() })
+          .then(() => toast('このリストの作成者として登録し、招待リンクを作りました'))
+          .catch(e => { console.warn('owner claim skipped', e?.code); session.legacyClaimFailed = true; render(); });
+      } else if (!d.inviteCode && (d.members || []).length < MAX_MEMBERS) {
+        fb.updateDoc(spaceRef(), { inviteCode: randomCode() }).catch(e => console.warn(e));
+      }
+    }
     // 相手に表示する自分の名前を登録・更新
     const me = session.user.uid;
     if (!session.infoSynced && d.memberInfo?.[me]?.name !== myName()) {
@@ -1374,13 +1390,16 @@ async function leaveSpace() {
   });
   if (!ok) return;
   const me = session.user.uid, ref = spaceRef(), members = session.space.members.filter(x => x !== me);
+  if (!members.length) { toast('最後の1人は抜けられません'); return; }
   try {
-    await fb.deleteDoc(userRef()); // 先に「入っているリスト」の記録を消す（抜けた後は書き込めないため）
-    stopListening();
+    // 先にリストから抜け、成功してから「入っているリスト」の記録を消す
+    // （逆の順番だと、抜けるのに失敗したときに自分のリストにたどり着けなくなる）
     await fb.updateDoc(ref, { members, [`memberInfo.${me}`]: fb.deleteField() });
-    showGate('nospace', { error: '' });
-    toast('リストから抜けました');
-  } catch (e) { writeErr(e); location.reload(); }
+  } catch (e) { writeErr(e); return; }
+  stopListening();
+  await fb.deleteDoc(userRef()).catch(e => console.warn(e));
+  showGate('nospace', { error: '' });
+  toast('リストから抜けました');
 }
 
 async function login() {
@@ -1902,10 +1921,17 @@ function renderSettings() {
     const n = memberName(id) || '（名前未設定）';
     const tags = [id === sp.ownerUid ? '作成者' : '', id === me ? 'あなた' : ''].filter(Boolean).join('・');
     const btn = owner && id !== me ? `<button class="btn sm danger" data-action="remove-member" data-id="${esc(id)}">外す</button>`
-      : !owner && id === me ? '<button class="btn sm danger" data-action="leave-space">抜ける</button>' : '';
+      : !owner && id === me && members.length > 1 ? '<button class="btn sm danger" data-action="leave-space">抜ける</button>' : '';
     return `<div class="member"><span class="avatar">${esc(n.slice(0, 1))}</span><span class="grow">${esc(n)}${tags ? ` <span class="muted small">（${tags}）</span>` : ''}</span>${btn}</div>`;
   }).join('');
   $('#memberCount').textContent = `${members.length} / ${MAX_MEMBERS}人`;
+  // 招待リンクを表示できないときは理由を出す
+  const noInvite = !sp.inviteCode && members.length < MAX_MEMBERS;
+  $('#inviteMissing').hidden = !noInvite;
+  $('#inviteMissing').textContent = !noInvite ? ''
+    : !sp.ownerUid && session.legacyClaimFailed
+      ? 'このリストは古い版で作られたため、招待リンクがまだありません。リストを作ったアカウントでログインすると、自動で招待リンクが作られます。それでも表示されない場合は、Firebase の Firestore のルールを最新（firestore.rules）にしてください。'
+      : '招待リンクを準備しています…';
   // 招待リンクはメンバー全員が送れる（再発行は作成者だけ）
   $('#inviteBox').hidden = members.length >= MAX_MEMBERS || !sp.inviteCode;
   $('#regenNote').hidden = !owner;
