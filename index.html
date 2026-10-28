@@ -11,8 +11,37 @@
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff">
 <script>
-  // 保存されたテーマを描画前に適用（ちらつき防止）
-  try { var t = localStorage.getItem('futari-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  // 保存されたテーマ・配色・背景の柄を描画前に適用（ちらつき防止）
+  (function () {
+    var root = document.documentElement;
+    function rgb(hex) { var m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); if (!m) return null; var n = parseInt(m[1], 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+    function lum(hex) { var c = rgb(hex); if (!c) return 1; var v = c.map(function (x) { x /= 255; return x <= .03928 ? x / 12.92 : Math.pow((x + .055) / 1.055, 2.4); }); return .2126 * v[0] + .7152 * v[1] + .0722 * v[2]; }
+    function contrast(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); }
+    // a = { bg: 背景色, accent: 強調色, pattern: 柄 }
+    window.applyAppearance = function (a) {
+      a = a || {};
+      var st = root.style;
+      if (rgb(a.bg)) {
+        st.setProperty('--bg', a.bg); st.setProperty('--gate-bg', a.bg);
+        root.dataset.tone = lum(a.bg) < 0.2 ? 'dark' : 'light';
+      } else { st.removeProperty('--bg'); st.removeProperty('--gate-bg'); delete root.dataset.tone; }
+      if (rgb(a.accent)) {
+        st.setProperty('--accent', a.accent);
+        // 強調色の上に載せる文字は、紺と白のうち読みやすい方
+        st.setProperty('--accent-ink', contrast(a.accent, '#1b2a4e') >= contrast(a.accent, '#ffffff') ? '#1b2a4e' : '#ffffff');
+        st.setProperty('--accent-soft', 'color-mix(in srgb, ' + a.accent + ' 20%, var(--surface))');
+        st.setProperty('--accent-line', 'color-mix(in srgb, ' + a.accent + ' 50%, var(--surface))');
+      } else { ['--accent', '--accent-ink', '--accent-soft', '--accent-line'].forEach(function (k) { st.removeProperty(k); }); }
+      if (a.pattern && a.pattern !== 'none') root.dataset.pattern = a.pattern; else delete root.dataset.pattern;
+    };
+    window.colorContrast = contrast;
+    window.colorLum = lum;
+    try {
+      var t = localStorage.getItem('futari-theme');
+      if (t === 'light' || t === 'dark') root.dataset.theme = t;
+      window.applyAppearance(JSON.parse(localStorage.getItem('futari-appearance') || '{}'));
+    } catch (e) {}
+  })();
 </script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='4' y='4' width='92' height='92' rx='26' fill='%23fabe00'/><text x='50' y='67' font-size='48' text-anchor='middle' fill='%231b2a4e' font-family='Noto Sans JP,sans-serif' font-weight='700'>食</text></svg>">
 <!-- フォント：源ノ角ゴシック（端末に入っていればそれを使い、なければ同一デザインの Noto Sans JP を読み込む） -->
@@ -122,6 +151,86 @@
   }
   :root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.7); }
 
+  /* 背景色を自分で設定したとき：背景の明るさに合わせて文字色などを自動で切り替える（テーマより優先） */
+  html:root[data-tone="light"] {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f3f5f9;
+    --navy: #1b2a4e;
+    --navy-2: #2f4472;
+    --navy-soft: #e8edf6;
+    --text: #1b2a4e;
+    --muted: #5a6683;
+    --border: #dfe4ee;
+    --accent-soft: #fff5d1;
+    --danger: #c62828;
+    --danger-fill: #c62828;
+    --danger-soft: #fdecec;
+    --danger-line: #f1c9c9;
+    --accent-line: #f3dc8a;
+    --on-navy: #ffffff;
+    --ok-ink: #1f6f43;
+    --warn-ink: #9a5b00;
+    --placeholder: #8a94ad;
+    --backdrop: rgba(27, 42, 78, .45);
+    --gate-bg: #f3f5f9;
+    --pin-want-border: #1b2a4e;
+    --pin-went: #1b2a4e;
+    --pin-went-border: #ffffff;
+    color-scheme: light;
+  }
+  html:root[data-tone="dark"] {
+    --bg: #0e1526;
+    --surface: #151f36;
+    --surface-2: #1c2845;
+    --navy: #e3e9f7;
+    --navy-2: #b9c6e4;
+    --navy-soft: #24335a;
+    --text: #e8edf8;
+    --muted: #9eabc7;
+    --border: #2c3a5c;
+    --accent-soft: #3a3214;
+    --accent-line: #6b5717;
+    --danger: #ff8a80;
+    --danger-fill: #d64545;
+    --danger-soft: #3a1d22;
+    --danger-line: #6b3038;
+    --on-navy: #0e1526;
+    --ok-ink: #7fd6a4;
+    --warn-ink: #f5c26b;
+    --placeholder: #7d8aa8;
+    --backdrop: rgba(0, 0, 0, .6);
+    --gate-bg: #0e1526;
+    --pin-want-border: #0e1526;
+    --pin-went: #e3e9f7;
+    --pin-went-border: #0e1526;
+    color-scheme: dark;
+  }
+  html:root[data-tone="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.7); }
+  html:root[data-tone="light"] .leaflet-tile-pane { filter: none; }
+
+  /* 背景の柄（--pc：文字色をうすくした柄の色、--pc2：強調色をうすくした柄の色） */
+  :root { --pc: color-mix(in srgb, var(--text) 9%, transparent); --pc2: color-mix(in srgb, var(--accent) 18%, transparent); }
+  html[data-pattern="dots"] body, html[data-pattern="dots"] .gate, .pat[data-p="dots"] {
+    background-image: radial-gradient(var(--pc) 1.7px, transparent 2.1px); background-size: 18px 18px;
+  }
+  html[data-pattern="stripe"] body, html[data-pattern="stripe"] .gate, .pat[data-p="stripe"] {
+    background-image: repeating-linear-gradient(-45deg, var(--pc) 0 2px, transparent 2px 14px);
+  }
+  html[data-pattern="grid"] body, html[data-pattern="grid"] .gate, .pat[data-p="grid"] {
+    background-image: linear-gradient(var(--pc) 1px, transparent 1px), linear-gradient(90deg, var(--pc) 1px, transparent 1px); background-size: 22px 22px;
+  }
+  html[data-pattern="gingham"] body, html[data-pattern="gingham"] .gate, .pat[data-p="gingham"] {
+    background-image: linear-gradient(90deg, var(--pc2) 50%, transparent 50%), linear-gradient(var(--pc2) 50%, transparent 50%); background-size: 32px 32px;
+  }
+  html[data-pattern="wave"] body, html[data-pattern="wave"] .gate, .pat[data-p="wave"] {
+    background-image: radial-gradient(circle at 50% 100%, transparent 7px, var(--pc) 7.5px, var(--pc) 9px, transparent 9.5px); background-size: 24px 12px;
+  }
+  html[data-pattern="zigzag"] body, html[data-pattern="zigzag"] .gate, .pat[data-p="zigzag"] {
+    background-image: linear-gradient(135deg, var(--pc) 25%, transparent 25%), linear-gradient(225deg, var(--pc) 25%, transparent 25%);
+    background-size: 20px 20px; background-position: 0 0, 10px 0;
+  }
+
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   html { -webkit-text-size-adjust: 100%; }
@@ -210,7 +319,7 @@
   }
   .btn:hover { background: var(--surface-2); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-  .btn.primary:hover { background: #ffc81f; }
+  .btn.primary:hover { filter: brightness(1.06); }
   .btn.navy { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
   .btn.danger { color: var(--danger); border-color: var(--danger-line); }
   .btn.ghost { background: transparent; border-color: transparent; }
@@ -259,7 +368,7 @@
   .active-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .active-filters:empty { display: none; }
   .active-filters .chip { min-height: 34px; font-size: 13.5px; padding: 2px 6px 2px 12px; }
-  .filter-body { display: grid; gap: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .filter-body { display: grid; gap: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: var(--surface); }
   .fgroup h3 { margin: 0 0 8px; font-size: 13px; font-weight: 800; color: var(--muted); letter-spacing: .04em; }
   .ffoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--border); padding-top: 14px; }
   .ffoot .hint { font-size: 13px; color: var(--muted); }
@@ -339,7 +448,7 @@
   .card-foot .nopos { margin-right: auto; font-size: 13px; color: var(--muted); align-self: center; }
   .card-foot .btn:first-child:not(:only-child) { margin-right: auto; }
 
-  .empty { text-align: center; padding: 48px 16px; border: 1.5px dashed var(--border); border-radius: var(--radius); color: var(--muted); }
+  .empty { text-align: center; padding: 48px 16px; border: 1.5px dashed var(--border); border-radius: var(--radius); color: var(--muted); background: var(--surface); }
   .empty p { margin: 0 0 16px; }
   .empty .btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
@@ -369,7 +478,7 @@
   .pin-wrap { background: none; border: 0; }
   .pin {
     display: block; width: 26px; height: 26px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
-    background: #fabe00; border: 3px solid var(--pin-want-border); box-shadow: 0 2px 6px rgba(0,0,0,.3);
+    background: var(--accent); border: 3px solid var(--pin-want-border); box-shadow: 0 2px 6px rgba(0,0,0,.3);
   }
   .pin.visited { background: var(--pin-went); border-color: var(--pin-went-border); }
   /* 地図で選んだお店：一覧と同じカードを地図の上に重ねて表示 */
@@ -386,7 +495,25 @@
   .leaflet-container, .gm-style .gm-style-iw { font-family: var(--font); }
 
   /* ---------- 設定 ---------- */
-  .panel { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 16px; margin-bottom: 14px; }
+  .panel { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 16px; margin-bottom: 14px; background: var(--surface); }
+  /* 配色・柄の設定 */
+  .swatches { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .swatch {
+    position: relative; width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; padding: 0;
+    background: var(--c); box-shadow: inset 0 0 0 2px var(--surface);
+  }
+  .swatch[aria-pressed="true"] { border-color: var(--navy); box-shadow: inset 0 0 0 2px var(--surface), 0 0 0 2px var(--navy); }
+  .swatch.custom { display: grid; place-items: center; background: conic-gradient(#f66, #fd5, #6d6, #5cf, #a6f, #f66); overflow: hidden; }
+  .swatch.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .swatch.custom span { width: 18px; height: 18px; border-radius: 50%; background: var(--c, transparent); border: 2px solid #fff; }
+  .pats { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
+  .pat-btn { display: grid; gap: 4px; padding: 6px; border: 2px solid var(--border); border-radius: 12px; background: var(--surface); cursor: pointer; font-size: 12.5px; color: var(--text); }
+  .pat-btn[aria-pressed="true"] { border-color: var(--navy); }
+  .pat { height: 44px; border-radius: 8px; background-color: var(--bg); border: 1px solid var(--border); }
+  .combos { display: flex; flex-wrap: wrap; gap: 8px; }
+  .combo { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 12px 4px 6px; border: 1.5px solid var(--border); border-radius: 99px; background: var(--surface); cursor: pointer; font-size: 13.5px; color: var(--text); }
+  .combo i { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--b) 50%, var(--a) 50%); border: 1px solid var(--border); }
+  .appear-warn { color: var(--warn-ink); font-size: 13px; margin: 8px 0 0; }
   .panel h2 { margin: 0 0 8px; font-size: 16.5px; }
   .panel p { margin: 0 0 12px; font-size: 14.5px; color: var(--muted); }
   .panel .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -652,6 +779,21 @@
         <button data-theme-opt="auto" aria-pressed="true">端末に合わせる</button>
         <button data-theme-opt="light" aria-pressed="false">ライト</button>
         <button data-theme-opt="dark" aria-pressed="false">ダーク</button>
+      </div>
+      <p class="small muted" id="themeToneNote" hidden style="margin:8px 0 0">背景色を設定しているため、文字の色は背景の明るさに合わせて自動で切り替わります。ライト／ダークの設定は、背景色を「標準」に戻すと使われます。</p>
+
+      <h3 class="sub">おすすめの組み合わせ</h3>
+      <div class="combos" id="comboList"></div>
+      <h3 class="sub">背景色</h3>
+      <div class="swatches" id="bgSwatches" role="group" aria-label="背景色"></div>
+      <h3 class="sub">強調色（ボタン・選択中の印・星など）</h3>
+      <div class="swatches" id="accentSwatches" role="group" aria-label="強調色"></div>
+      <h3 class="sub">背景の柄</h3>
+      <div class="pats" id="patternList" role="group" aria-label="背景の柄"></div>
+      <p class="appear-warn" id="appearWarn" hidden></p>
+      <div class="row" style="margin-top:12px">
+        <button class="btn sm" data-action="appear-reset">配色と柄を標準に戻す</button>
+        <span class="small muted">この設定はこの端末だけに保存されます。</span>
       </div>
     </div>
 
@@ -1590,6 +1732,7 @@ function renderSettings() {
   $('#gmKey').value = lsGet(GM_KEY) || '';
   const theme = lsGet(THEME_KEY) || 'auto';
   $$('#themeSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeOpt === theme)));
+  renderAppearance();
   const sp = session.space || {};
   const members = sp.members || [];
   const me = session.user?.uid;
@@ -1644,13 +1787,16 @@ const getGmKey = () => lsGet(GM_KEY) || '';
 const THEME_KEY = 'futari-theme';
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
 const isDark = () => {
-  const t = document.documentElement.dataset.theme;
-  return t === 'dark' || (!t && darkQuery.matches);
+  const { tone, theme } = document.documentElement.dataset;
+  if (tone) return tone === 'dark'; // 背景色を設定しているときは、その明るさで決まる
+  return theme === 'dark' || (!theme && darkQuery.matches);
 };
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function updateThemeColor() { $('meta[name="theme-color"]').content = cssVar('--bg') || (isDark() ? '#0e1526' : '#ffffff'); }
 function applyTheme(theme) {
   if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
   else delete document.documentElement.dataset.theme;
-  $('meta[name="theme-color"]').content = isDark() ? '#0e1526' : '#ffffff';
+  updateThemeColor();
 }
 function setTheme(theme) {
   const wasDark = isDark();
@@ -1665,6 +1811,73 @@ darkQuery.addEventListener('change', () => {
   if (MapView.kind === 'google') MapView.recreateGoogle();
 });
 applyTheme(lsGet(THEME_KEY) || 'auto');
+
+/* =========================================================
+   配色（背景色・強調色）と背景の柄　※この端末だけに保存
+   適用処理（applyAppearance）は、ちらつき防止のため <head> の中で定義している
+   ========================================================= */
+const APPEAR_KEY = 'futari-appearance';
+const BG_PRESETS = [
+  ['', '標準'], ['#fff8ef', 'クリーム'], ['#fff3f6', 'さくら'], ['#f1faf5', 'ミント'], ['#eef5ff', 'そら'],
+  ['#f5f2ff', 'ラベンダー'], ['#f3f1ec', 'グレージュ'], ['#14213d', '紺'], ['#1f2328', '墨'],
+];
+const ACCENT_PRESETS = [
+  ['', '標準（黄）'], ['#ff7a45', 'オレンジ'], ['#e85a8a', 'ピンク'], ['#22a06b', 'グリーン'], ['#2f80ed', 'ブルー'],
+  ['#7c5cff', 'パープル'], ['#0ea5b7', 'ターコイズ'], ['#d4380d', 'レッド'],
+];
+const PATTERNS = [['none', '無地'], ['dots', 'ドット'], ['stripe', 'ストライプ'], ['grid', '方眼'], ['gingham', 'ギンガム'], ['wave', '波'], ['zigzag', 'ジグザグ']];
+const COMBOS = [
+  { name: '標準', bg: '', accent: '', pattern: 'none' },
+  { name: 'さくら', bg: '#fff3f6', accent: '#e85a8a', pattern: 'dots' },
+  { name: 'ミント', bg: '#f1faf5', accent: '#22a06b', pattern: 'grid' },
+  { name: 'クリーム', bg: '#fff8ef', accent: '#ff7a45', pattern: 'gingham' },
+  { name: 'そら', bg: '#eef5ff', accent: '#2f80ed', pattern: 'wave' },
+  { name: '夜', bg: '#14213d', accent: '#fabe00', pattern: 'stripe' },
+];
+const getAppearance = () => { try { return JSON.parse(lsGet(APPEAR_KEY) || '{}') || {}; } catch { return {}; } };
+function setAppearance(patch) {
+  const wasDark = isDark();
+  const a = { ...getAppearance(), ...patch };
+  for (const k of Object.keys(a)) if (!a[k] || a[k] === 'none') delete a[k];
+  Object.keys(a).length ? lsSet(APPEAR_KEY, JSON.stringify(a)) : lsDel(APPEAR_KEY);
+  window.applyAppearance(a);
+  updateThemeColor();
+  renderSettings();
+  // 地図のピンの色を塗り直す（Google マップは配色を作成時にしか決められないため、明暗が変わったら作り直す）
+  if (wasDark !== isDark() && MapView.kind === 'google') MapView.recreateGoogle();
+  else if (ui.tab === 'map') renderMap();
+}
+function renderAppearance() {
+  const a = getAppearance();
+  const swatches = (kind, presets, cur, fallback) => {
+    const known = presets.some(([c]) => c === (cur || ''));
+    return presets.map(([c, label]) => `<button type="button" class="swatch" data-appear="${kind}" data-val="${c}" aria-pressed="${(cur || '') === c}" aria-label="${label}" title="${label}" style="--c:${c || fallback}"></button>`).join('')
+      + `<label class="swatch custom" title="ほかの色を選ぶ"><input type="color" data-appear-input="${kind}" value="${cur || (kind === 'bg' ? '#ffffff' : '#fabe00')}" aria-label="ほかの色を選ぶ"><span style="--c:${!known && cur ? cur : 'transparent'}"></span></label>`;
+  };
+  $('#bgSwatches').innerHTML = swatches('bg', BG_PRESETS, a.bg, 'linear-gradient(135deg, #ffffff 50%, #0e1526 50%)');
+  $('#accentSwatches').innerHTML = swatches('accent', ACCENT_PRESETS, a.accent, '#fabe00');
+  $('#patternList').innerHTML = PATTERNS.map(([id, label]) =>
+    `<button type="button" class="pat-btn" data-appear="pattern" data-val="${id === 'none' ? '' : id}" aria-pressed="${(a.pattern || 'none') === id}"><span class="pat" data-p="${id}"></span>${label}</button>`).join('');
+  $('#comboList').innerHTML = COMBOS.map((c, i) =>
+    `<button type="button" class="combo" data-combo="${i}"><i style="--b:${c.bg || '#ffffff'};--a:${c.accent || '#fabe00'}"></i>${c.name}</button>`).join('');
+  $('#themeToneNote').hidden = !a.bg;
+  // 強調色が背景と近すぎると、ボタンや印が見えにくくなる
+  const bg = cssVar('--bg') || '#ffffff', surface = cssVar('--surface') || '#ffffff', accent = cssVar('--accent') || '#fabe00';
+  const weak = Math.min(window.colorContrast(accent, bg), window.colorContrast(accent, surface)) < 1.35;
+  $('#appearWarn').hidden = !weak;
+  $('#appearWarn').textContent = weak ? '強調色が背景と近い色のため、ボタンや選択中の印が見えにくくなります。別の色の組み合わせをおすすめします。' : '';
+}
+// 「ほかの色」：色を動かしている間もすぐ反映する
+document.addEventListener('input', e => {
+  const inp = e.target.closest?.('[data-appear-input]');
+  if (!inp) return;
+  window.applyAppearance({ ...getAppearance(), [inp.dataset.appearInput]: inp.value });
+  updateThemeColor();
+});
+document.addEventListener('change', e => {
+  const inp = e.target.closest?.('[data-appear-input]');
+  if (inp) setAppearance({ [inp.dataset.appearInput]: inp.value });
+});
 let gmAuthFailed = false;
 let gmLoading = null;
 window.gm_authFailure = () => {
@@ -1789,7 +2002,7 @@ const MapView = {
         const pin = new google.maps.marker.PinElement({
           ...(s.visited
             ? (isDark() ? { background: '#e3e9f7', borderColor: '#0e1526', glyphColor: '#0e1526' } : { background: '#1b2a4e', borderColor: '#ffffff', glyphColor: '#ffffff' })
-            : { background: '#fabe00', borderColor: isDark() ? '#0e1526' : '#1b2a4e', glyphColor: '#1b2a4e' }),
+            : { background: cssVar('--accent') || '#fabe00', borderColor: isDark() ? '#0e1526' : '#1b2a4e', glyphColor: cssVar('--accent-ink') || '#1b2a4e' }),
         });
         const m = new google.maps.marker.AdvancedMarkerElement({
           map: this.map, position: { lat: s.lat, lng: s.lng }, title: s.name, content: pin.element,
@@ -2752,6 +2965,10 @@ document.addEventListener('click', async e => {
     render();
     return;
   }
+  const ap = e.target.closest('[data-appear]');
+  if (ap) { setAppearance({ [ap.dataset.appear]: ap.dataset.val }); return; }
+  const cb = e.target.closest('[data-combo]');
+  if (cb) { const c = COMBOS[+cb.dataset.combo]; setAppearance({ bg: c.bg, accent: c.accent, pattern: c.pattern }); return; }
   const th = e.target.closest('[data-theme-opt]');
   if (th) { setTheme(th.dataset.themeOpt); return; }
   const sc = e.target.closest('[data-select-id]');
@@ -2830,6 +3047,7 @@ document.addEventListener('click', async e => {
     }
     case 'geocode': runGeocode(); break;
     case 'remove-image': form.image = ''; form.imageFrom = tabelogTop($('#fTabelog').value) || ''; form.imageHidden = true; form.imageState = ''; renderImagePreview(); break;
+    case 'appear-reset': setAppearance({ bg: '', accent: '', pattern: '' }); break;
     case 'copy-error': copyErrorReport(a.closest('.err-box')); break;
     case 'refetch-image': { const t = tabelogTop($('#fTabelog').value); infoCache.delete(t); lsInfo(t, null); fetchFormImage({ applyGenres: !form.genresApplied }); break; }
     case 'pick-geo': {
