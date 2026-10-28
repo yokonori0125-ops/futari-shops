@@ -295,7 +295,7 @@
   .tabbar .tab-add span.lbl { display: none; }
   @media (min-width: 900px) {
     :root { --bar-h: 0px; }
-    #app { padding-bottom: 112px; } /* 右下の＋ボタンに最後のカードが隠れないように */
+    #app { padding-bottom: 144px; } /* 右下の＋ボタンに最後のカードが隠れないように */
     .tabbar {
       position: sticky; top: 56px; height: auto; padding: 0; grid-template-columns: none; display: flex; justify-content: center; gap: 8px;
       border-top: 0; border-bottom: 1px solid var(--border); z-index: 999;
@@ -308,13 +308,13 @@
       position: fixed; right: 28px; bottom: 28px; z-index: 1150; padding: 0; height: auto; border-radius: 50%;
     }
     .tabbar .tab-add .plus {
-      width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center;
+      width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center;
       box-shadow: 0 8px 24px rgba(27, 42, 78, .28); transition: transform .15s, box-shadow .15s;
     }
     .tabbar .tab-add:hover .plus { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(27, 42, 78, .32); }
     .tabbar .tab-add:focus-visible { outline: none; }
     .tabbar .tab-add:focus-visible .plus { outline: 3px solid var(--navy); outline-offset: 3px; }
-    .tabbar .tab-add .plus svg.i { width: 30px; height: 30px; stroke-width: 2.6; }
+    .tabbar .tab-add .plus svg.i { width: 45px; height: 45px; stroke-width: 2.6; }
     .tabbar .tab-add span.lbl { display: none; }
     /* 設定画面と、まとめて削除の選択中は表示しない（下部のバーや設定に重ならないように） */
     body[data-view="settings"] .tabbar .tab-add, body.selecting .tabbar .tab-add { display: none; }
