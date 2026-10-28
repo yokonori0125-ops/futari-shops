@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>美味しいもの食べいこ！</title>
-<meta name="description" content="美味しいもの食べいこ！ — ふたりで行きたいお店をリスト化して共有するWebアプリ">
+<meta name="description" content="美味しいもの食べいこ！ — 行きたいお店をリスト化して、招待した人と共有するWebアプリ">
 <meta name="apple-mobile-web-app-title" content="美味しいもの食べいこ！">
 <meta name="application-name" content="美味しいもの食べいこ！">
 <meta name="robots" content="noindex, nofollow">
@@ -777,22 +777,18 @@
   <!-- 設定・共有 -->
   <section id="tab-settings" hidden>
     <div class="panel">
-      <h2>メンバー</h2>
+      <h2>メンバー <span class="small muted" id="memberCount"></span></h2>
       <div id="members"></div>
-      <div id="requestsBox" hidden>
-        <h3 class="sub">参加申請</h3>
-        <div id="requests"></div>
-        <p class="small muted" style="margin:6px 0 0">心当たりのない申請は「拒否」してください。承認するまで、申請者はリストを一切見られません。</p>
-      </div>
       <div id="inviteBox" hidden>
-        <p style="margin-top:12px">相手にこの<strong>招待リンク</strong>を送ってください。相手が開いて Google でログインすると参加申請が届き、あなたが<strong>承認</strong>するとリストに参加します。</p>
+        <p style="margin-top:12px">一緒に使う人にこの<strong>招待リンク</strong>を送ってください。開いて Google でログインすると、<strong>すぐにリストに参加</strong>できます。</p>
         <div class="row">
           <input type="text" id="inviteUrl" readonly>
           <button class="btn primary" data-action="share-invite">送る / コピー</button>
         </div>
-        <div class="note">リンクが漏れたかもしれないときは <button class="linkbtn" data-action="regen-invite">招待リンクを再発行</button> してください。古いリンクは使えなくなります。</div>
+        <div class="note">このリンクを知っている人は誰でも参加して、お店を見たり編集したりできます。送る相手に注意してください。
+          <span id="regenNote">リンクが漏れたかもしれないときは <button class="linkbtn" data-action="regen-invite">招待リンクを再発行</button> してください。古いリンクは使えなくなります。</span></div>
       </div>
-      <div class="note" id="fullNote" hidden>ふたりがそろっています。新しい参加申請は受け付けません。</div>
+      <div class="note" id="fullNote" hidden>参加できる上限（10人）に達しています。新しく参加してもらうには、誰かに抜けてもらうか、作成者がメンバーを外してください。</div>
     </div>
 
     <div class="panel">
@@ -1233,8 +1229,8 @@ async function onAuth(user) {
     if (join && join.spaceId !== spaceId) {
       const go = !spaceId || await choose({
         title: '別のリストに招待されています',
-        message: '招待されたリストに参加申請しますか？\n今のリストのデータは消えず、もう一人のメンバーは引き続き使えます。',
-        buttons: [{ label: '今のリストを使う', value: false }, { label: '参加申請する', value: true, kind: 'primary' }],
+        message: '招待されたリストに参加しますか？\n今のリストのデータは消えず、ほかのメンバーは引き続き使えます。',
+        buttons: [{ label: '今のリストを使う', value: false }, { label: '参加する', value: true, kind: 'primary' }],
       });
       if (go) { await requestJoin(join); return; }
     }
@@ -1246,7 +1242,12 @@ async function onAuth(user) {
     enterSpace(spaceId);
   } catch (e) {
     console.error(e);
-    showGate('error', { error: `読み込みに失敗しました（${errText(e)}）。通信状況を確認して再読み込みしてください。` });
+    showGate('error', {
+      error: e?.code === 'permission-denied'
+        ? `このアカウント（${session.user?.email || ''}）では読み込めませんでした（権限がありません）。リストの作成者の方は、Firebase に公開している Firestore のルールが最新（firestore.rules）か確認してください。`
+        : `読み込みに失敗しました（${errText(e)}）。通信状況を確認して再読み込みしてください。`,
+      logout: e?.code === 'permission-denied',
+    });
   }
 }
 
@@ -1264,34 +1265,22 @@ async function tryEnterAsMember(spaceId) {
   return true;
 }
 
-// 参加申請：招待コードを添えて申請し、作成者の承認を待つ
+// 招待リンクから参加：有効な招待コードを添えて、自分をメンバーに追加する（承認なし・最大10人）
+const MAX_MEMBERS = 10;
 async function requestJoin({ spaceId, code }) {
   if (await tryEnterAsMember(spaceId)) return;
-  const reqRef = fb.doc(fb.fs, 'spaces', spaceId, 'requests', session.user.uid);
-  let exists = false;
-  try { exists = (await fb.getDoc(reqRef)).exists(); } catch {}
-  if (!exists) {
-    try {
-      await fb.setDoc(reqRef, { code, name: myName(), email: session.user.email || '', createdAt: Date.now() });
-    } catch (e) {
-      console.warn(e);
-      clearPendingJoin();
-      showGate('nospace', { error: 'この招待リンクは使えません。リンクが再発行されたか、すでに2人が参加しています。相手に新しい招待リンクを送ってもらってください。' });
-      return;
-    }
-  }
-  showGate('waiting');
-  session.unsubs.push(fb.onSnapshot(reqRef, async snap => {
-    if (snap.exists()) return;
-    // 申請が処理された（承認 or 拒否）
-    stopListening();
-    if (await tryEnterAsMember(spaceId)) { toast('参加が承認されました'); return; }
-    clearPendingJoin();
-    showGate('nospace', { error: '参加申請は承認されませんでした。' });
-  }, e => {
+  showGate('loading', { text: 'リストに参加しています…' });
+  try {
+    await fb.updateDoc(fb.doc(fb.fs, 'spaces', spaceId), { members: fb.arrayUnion(session.user.uid), joinCode: code });
+  } catch (e) {
     console.warn(e);
-    showGate('error', { error: `参加申請の状態を確認できませんでした（${errText(e)}）。再読み込みしてください。` });
-  }));
+    clearPendingJoin();
+    showGate('nospace', { error: `この招待リンクは使えません。リンクが再発行されたか、参加できる上限（${MAX_MEMBERS}人）に達しています。招待した人に新しいリンクを送ってもらってください。` });
+    return;
+  }
+  if (await tryEnterAsMember(spaceId)) { toast('リストに参加しました'); return; }
+  clearPendingJoin();
+  showGate('nospace', { error: 'リストに参加できませんでした。再読み込みしてもう一度お試しください。' });
 }
 
 async function createSpace() {
@@ -1324,7 +1313,6 @@ async function createSpace() {
 }
 
 const isOwner = () => !!session.user && session.space?.ownerUid === session.user.uid;
-const reqDoc = id => fb.doc(fb.fs, 'spaces', session.spaceId, 'requests', id);
 
 function enterSpace(id) {
   session.spaceId = id;
@@ -1346,17 +1334,6 @@ function enterSpace(id) {
       session.infoSynced = true;
       fb.updateDoc(spaceRef(), { [`memberInfo.${me}`]: { name: myName() } }).catch(e => console.warn(e));
     }
-    // 作成者は参加申請を監視する
-    if (isOwner() && !session.requestsListening) {
-      session.requestsListening = true;
-      session.unsubs.push(fb.onSnapshot(fb.collection(spaceRef(), 'requests'), rs => {
-        const before = new Set(session.requests.map(r => r.id));
-        session.requests = rs.docs.map(x => ({ id: x.id, ...x.data() })).sort((a, b) => a.createdAt - b.createdAt);
-        const fresh = session.requests.filter(r => !before.has(r.id));
-        if (fresh.length) toast(`${fresh[0].name || '誰か'}さんから参加申請が届きました`);
-        render();
-      }, e => console.warn(e)));
-    }
     render();
   }, onErr));
   session.unsubs.push(fb.onSnapshot(shopsCol(), snap => {
@@ -1368,40 +1345,7 @@ function enterSpace(id) {
   showApp();
 }
 
-// 作成者の操作：承認・拒否・招待リンク再発行・メンバーから外す
-async function approveRequest(id) {
-  const r = session.requests.find(x => x.id === id);
-  if (!r) return;
-  const ok = await choose({
-    title: `${r.name || '申請者'}さんを参加させますか？`,
-    message: `Google アカウント: ${r.email || '（不明）'}\n\n承認すると、このリストの閲覧・編集ができるようになります。心当たりのない人は「拒否」してください。`,
-    buttons: [{ label: 'キャンセル', value: null }, { label: '承認する', value: true, kind: 'primary' }],
-  });
-  if (!ok) return;
-  try {
-    const b = fb.writeBatch(fb.fs);
-    b.update(spaceRef(), { members: [session.space.ownerUid, id], inviteCode: null, [`memberInfo.${id}`]: { name: r.name || '' } });
-    session.requests.forEach(x => b.delete(reqDoc(x.id))); // ほかの申請も同時に締め切る
-    await b.commit();
-    toast(`${r.name || '申請者'}さんが参加しました`);
-  } catch (e) { writeErr(e); }
-}
-async function rejectRequest(id) {
-  const r = session.requests.find(x => x.id === id);
-  const ok = await choose({
-    title: `${r?.name || '申請者'}さんの申請を拒否しますか？`,
-    message: '拒否すると招待リンクも作り直され、今までのリンクは使えなくなります。',
-    buttons: [{ label: 'キャンセル', value: null }, { label: '拒否する', value: true, kind: 'danger-fill' }],
-  });
-  if (!ok) return;
-  try {
-    const b = fb.writeBatch(fb.fs);
-    b.delete(reqDoc(id));
-    b.update(spaceRef(), { inviteCode: randomCode() });
-    await b.commit();
-    toast('拒否しました。招待リンクを作り直しました');
-  } catch (e) { writeErr(e); }
-}
+// 招待リンクの再発行・メンバーを外す（作成者）・リストから抜ける（作成者以外）
 async function regenInvite() {
   const ok = await choose({
     title: '招待リンクを再発行しますか？',
@@ -1419,8 +1363,24 @@ async function removeMember(id) {
   });
   if (!ok) return;
   fb.updateDoc(spaceRef(), {
-    members: [session.space.ownerUid], inviteCode: randomCode(), [`memberInfo.${id}`]: fb.deleteField(),
+    members: session.space.members.filter(x => x !== id), inviteCode: randomCode(), [`memberInfo.${id}`]: fb.deleteField(),
   }).then(() => toast('メンバーから外しました')).catch(writeErr);
+}
+async function leaveSpace() {
+  const ok = await choose({
+    title: 'このリストから抜けますか？',
+    message: '抜けるとリストを見られなくなります。登録済みのお店は残ります。もう一度参加するには、新しい招待リンクが必要です。',
+    buttons: [{ label: 'キャンセル', value: null }, { label: '抜ける', value: true, kind: 'danger-fill' }],
+  });
+  if (!ok) return;
+  const me = session.user.uid, ref = spaceRef(), members = session.space.members.filter(x => x !== me);
+  try {
+    await fb.deleteDoc(userRef()); // 先に「入っているリスト」の記録を消す（抜けた後は書き込めないため）
+    stopListening();
+    await fb.updateDoc(ref, { members, [`memberInfo.${me}`]: fb.deleteField() });
+    showGate('nospace', { error: '' });
+    toast('リストから抜けました');
+  } catch (e) { writeErr(e); location.reload(); }
 }
 
 async function login() {
@@ -1517,8 +1477,8 @@ function showGate(state, opts = {}) {
     html = `<p class="gate-loading">${esc(opts.text || '読み込み中…')}</p>`;
   } else if (state === 'login') {
     html = `
-      <p>ふたりだけで使う、行きたいお店のリストです。<br>Google アカウントでログインしてください。</p>
-      ${pendingJoin() ? '<div class="gate-info">招待リンクから開きました。ログインすると、リストの作成者に参加申請が届きます。</div>' : ''}
+      <p>招待した人と一緒に使う、行きたいお店のリストです。<br>Google アカウントでログインしてください。</p>
+      ${pendingJoin() ? '<div class="gate-info">招待リンクから開きました。ログインすると、そのままリストに参加します。</div>' : ''}
       ${isInAppBrowser() ? '<div class="gate-err">LINE などのアプリ内ブラウザでは Google ログインができません。メニューから「ブラウザで開く」（Safari / Chrome）を選んでください。</div>' : ''}
       ${err}
       <button class="btn primary big" data-action="login">Google でログイン</button>`;
@@ -1529,14 +1489,8 @@ function showGate(state, opts = {}) {
       <button class="btn primary big" data-action="create-space">新しいリストを作る</button>
       <p class="small">相手がすでにリストを作っている場合は、ここで作らずに、相手から届いた<b>招待リンク</b>を開いてください。</p>
       <button class="btn ghost sm" data-action="logout-now">別のアカウントでログイン</button>`;
-  } else if (state === 'waiting') {
-    html = `
-      <div class="gate-info">参加申請を送りました。</div>
-      <p>リストの作成者が承認すると、この画面が自動で切り替わります。<br>このページを閉じても大丈夫です（あとで開き直せば続きから進みます）。</p>
-      <p class="small">申請したアカウント: ${esc(session.user?.email || myName())}</p>
-      <button class="btn ghost sm" data-action="logout-now">別のアカウントでログイン</button>`;
   } else {
-    html = `${err}<button class="btn big" data-action="reload">再読み込み</button>`;
+    html = `${err}<button class="btn big" data-action="reload">再読み込み</button>${opts.logout ? '<button class="btn ghost sm" data-action="logout-now">別のアカウントでログイン</button>' : ''}`;
   }
   $('#gateBody').innerHTML = html;
 }
@@ -1924,7 +1878,7 @@ async function deleteSelected() {
   const names = shops.slice(0, 5).map(s => `・${s.name}`).join('\n') + (shops.length > 5 ? `\nほか${shops.length - 5}件` : '');
   const ok = await choose({
     title: `${shops.length}件のお店を削除しますか？`,
-    message: `${names}\n\n相手の画面からも消えます。元に戻せません。`,
+    message: `${names}\n\nほかのメンバーの画面からも消えます。元に戻せません。`,
     buttons: [{ label: 'キャンセル', value: null }, { label: `${shops.length}件を削除`, value: true, kind: 'danger-fill' }],
   });
   if (!ok) return;
@@ -1947,18 +1901,15 @@ function renderSettings() {
   $('#members').innerHTML = members.map(id => {
     const n = memberName(id) || '（名前未設定）';
     const tags = [id === sp.ownerUid ? '作成者' : '', id === me ? 'あなた' : ''].filter(Boolean).join('・');
-    return `<div class="member"><span class="avatar">${esc(n.slice(0, 1))}</span><span class="grow">${esc(n)}${tags ? ` <span class="muted small">（${tags}）</span>` : ''}</span>${owner && id !== me ? `<button class="btn sm danger" data-action="remove-member" data-id="${esc(id)}">外す</button>` : ''}</div>`;
+    const btn = owner && id !== me ? `<button class="btn sm danger" data-action="remove-member" data-id="${esc(id)}">外す</button>`
+      : !owner && id === me ? '<button class="btn sm danger" data-action="leave-space">抜ける</button>' : '';
+    return `<div class="member"><span class="avatar">${esc(n.slice(0, 1))}</span><span class="grow">${esc(n)}${tags ? ` <span class="muted small">（${tags}）</span>` : ''}</span>${btn}</div>`;
   }).join('');
-  const reqs = owner ? session.requests : [];
-  $('#requestsBox').hidden = !reqs.length;
-  $('#requests').innerHTML = reqs.map(r => `<div class="member req">
-      <span class="avatar">${esc((r.name || '?').slice(0, 1))}</span>
-      <span class="grow"><b>${esc(r.name || '（名前なし）')}</b><br><span class="muted small">${esc(r.email || '')}</span></span>
-      <button class="btn sm" data-action="reject-req" data-id="${esc(r.id)}">拒否</button>
-      <button class="btn sm primary" data-action="approve-req" data-id="${esc(r.id)}">承認</button>
-    </div>`).join('');
-  $('#inviteBox').hidden = !owner || members.length >= 2 || !sp.inviteCode;
-  $('#fullNote').hidden = members.length < 2;
+  $('#memberCount').textContent = `${members.length} / ${MAX_MEMBERS}人`;
+  // 招待リンクはメンバー全員が送れる（再発行は作成者だけ）
+  $('#inviteBox').hidden = members.length >= MAX_MEMBERS || !sp.inviteCode;
+  $('#regenNote').hidden = !owner;
+  $('#fullNote').hidden = members.length < MAX_MEMBERS;
   if (session.spaceId && sp.inviteCode) $('#inviteUrl').value = inviteUrl();
   const u = session.user;
   $('#accountInfo').textContent = u ? `ログイン中: ${u.displayName || ''}${u.email ? `（${u.email}）` : ''}` : '';
@@ -2978,7 +2929,7 @@ async function shareInvite() {
 async function askImport(data, sourceLabel) {
   const mode = await choose({
     title: `${sourceLabel}を読み込みますか？`,
-    message: `${data.shops.length}件のお店が含まれています。\n\n統合：今のリストに追加・更新します（同じお店は新しく編集された方を採用）\n置き換え：今のリストを消して、読み込んだ内容にします（相手の画面からも消えます）`,
+    message: `${data.shops.length}件のお店が含まれています。\n\n統合：今のリストに追加・更新します（同じお店は新しく編集された方を採用）\n置き換え：今のリストを消して、読み込んだ内容にします（ほかのメンバーの画面からも消えます）`,
     buttons: [
       { label: 'キャンセル', value: null },
       { label: '置き換える', value: 'replace' },
@@ -3000,7 +2951,7 @@ async function importLegacy() {
   if (!legacy.shops.length) return;
   const ok = await choose({
     title: 'この端末のデータを取り込みますか？',
-    message: `${legacy.shops.length}件のお店を、ふたりのリストに追加します（同じお店は新しく編集された方を採用）。`,
+    message: `${legacy.shops.length}件のお店を、このリストに追加します（同じお店は新しく編集された方を採用）。`,
     buttons: [{ label: 'キャンセル', value: null }, { label: '取り込む', value: true, kind: 'primary' }],
   });
   if (!ok) return;
@@ -3051,7 +3002,7 @@ $('#gmKeyClear').addEventListener('click', () => {
 $('#wipe').addEventListener('click', async () => {
   const ok = await choose({
     title: 'すべてのお店を削除しますか？',
-    message: 'ふたりのリストが空になり、相手の画面からも消えます。元に戻せないので、必要なら先にJSONを書き出してください。',
+    message: 'リストが空になり、ほかのメンバーの画面からも消えます。元に戻せないので、必要なら先にJSONを書き出してください。',
     buttons: [{ label: 'キャンセル', value: null }, { label: '削除する', value: true, kind: 'danger-fill' }],
   });
   if (!ok) return;
@@ -3207,8 +3158,7 @@ document.addEventListener('click', async e => {
     }
     case 'delete-selected': deleteSelected(); break;
     case 'regen-invite': regenInvite(); break;
-    case 'approve-req': approveRequest(id); break;
-    case 'reject-req': rejectRequest(id); break;
+    case 'leave-space': leaveSpace(); break;
     case 'remove-member': removeMember(id); break;
     case 'open-settings': switchTab('settings'); break;
     case 'import-legacy': importLegacy(); break;
@@ -3227,7 +3177,7 @@ document.addEventListener('click', async e => {
       if (!s) break;
       const ok = await choose({
         title: `「${s.name}」を削除しますか？`,
-        message: '相手の画面からも消えます。',
+        message: 'ほかのメンバーの画面からも消えます。',
         buttons: [{ label: 'キャンセル', value: null }, { label: '削除する', value: true, kind: 'danger-fill' }],
       });
       if (!ok) break;
