@@ -434,6 +434,16 @@
   .tag { font-size: 13px; padding: 2px 10px; border-radius: 7px; line-height: 1.6; }
   .tag.genre { background: var(--accent-soft); color: var(--text); font-weight: 700; }
   .tag.mood { background: var(--navy-soft); color: var(--navy-2); }
+  .emos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -2px; }
+  .emo { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); }
+  .emo::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); opacity: .7; }
+  .emo + .emo { margin-left: 2px; }
+  .emo.hit { color: var(--text); font-weight: 700; }
+  .emo.hit::before { opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+  #resultCount b { color: var(--text); }
+  .list-head { flex-wrap: wrap; }
+  .list-head .tools { flex-shrink: 0; margin-left: auto; }
+  #resultCount.emo-msg { flex: 1 1 100%; order: 2; color: var(--text); font-size: 13.5px; }
   .memo { margin: 0; font-size: 14.5px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
   .links { display: flex; flex-wrap: wrap; gap: 8px; }
   .lk {
@@ -690,7 +700,7 @@
   </div>
   <section class="filters" id="filters" aria-label="検索・絞り込み">
     <div class="filter-top">
-      <label class="search"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input type="search" id="q" placeholder="キーワードで検索" autocomplete="off" aria-label="店名・エリア・メモ・タグで検索"></label>
+      <label class="search"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input type="search" id="q" placeholder="キーワードや気分（例: うれしい）で検索" autocomplete="off" aria-label="店名・エリア・メモ・タグ、または気分で検索"></label>
       <button class="btn" id="filterToggle" aria-expanded="false" aria-controls="filterBody"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span>絞り込み</span><span class="badge" id="filterBadge"></span></button>
     </div>
     <div class="seg" id="statusSeg" role="group" aria-label="状態">
@@ -700,6 +710,7 @@
     </div>
     <div class="active-filters" id="activeFilters"></div>
     <div class="filter-body" id="filterBody" hidden>
+      <div class="fgroup"><h3>気分で探す</h3><div class="chips" id="fEmotion"></div></div>
       <div class="fgroup"><h3>エリア</h3><div class="chips" id="fArea"></div></div>
       <div class="fgroup"><h3>ジャンル</h3><div class="chips" id="fGenre"></div></div>
       <div class="fgroup"><h3>雰囲気</h3><div class="chips" id="fMood"></div></div>
@@ -1527,8 +1538,160 @@ function showApp() {
 /* =========================================================
    絞り込み
    ========================================================= */
+/* =========================================================
+   気分（感情）タグ
+   1) お店のジャンル・雰囲気・メモ・食べログ評価から、そのお店が満たしてくれる気分を導き出す
+   2) 検索語（言い換え・今の状態を含む）を気分に読み替え、近い気分も含めて点数を付ける
+   外部サービスは使わず、下の対応表だけで決まる（結果の理由を説明できるようにするため）
+   ========================================================= */
+const EMOTIONS = {
+  joy: 'うれしい', fun: '楽しい', excite: 'わくわく', romance: 'ときめき', celebrate: 'お祝い', treat: 'ご褒美',
+  relief: 'ほっとする', heal: '癒やされる', energy: '元気が出る', sweet: '甘い気分', nostalgia: '懐かしい',
+  solo: 'ひとり時間', talk: '語り合う', moved: '感動',
+};
+// 気分どうしの近さ（0〜1）。片方だけ書けば両方向に使う
+const EMOTION_NEAR = [
+  ['joy', 'fun', .7], ['joy', 'celebrate', .7], ['joy', 'excite', .5], ['joy', 'treat', .5], ['joy', 'romance', .4], ['joy', 'sweet', .4],
+  ['fun', 'excite', .6], ['fun', 'energy', .4], ['fun', 'talk', .4],
+  ['excite', 'romance', .5], ['excite', 'moved', .5],
+  ['romance', 'celebrate', .5], ['romance', 'talk', .3],
+  ['celebrate', 'treat', .6], ['celebrate', 'moved', .4],
+  ['treat', 'moved', .5], ['treat', 'heal', .3], ['treat', 'sweet', .4],
+  ['relief', 'heal', .8], ['relief', 'nostalgia', .5], ['relief', 'solo', .4],
+  ['heal', 'sweet', .4], ['heal', 'solo', .4],
+  ['talk', 'solo', .2], ['nostalgia', 'talk', .3],
+];
+const nearOf = (() => {
+  const m = {};
+  for (const [a, b, w] of EMOTION_NEAR) { (m[a] ||= {})[b] = w; (m[b] ||= {})[a] = w; }
+  return id => m[id] || {};
+})();
+// お店のタグ → 気分（重み）
+const TAG_EMOTIONS = {
+  // 雰囲気
+  デート向き: { romance: .9, excite: .3 }, 記念日: { celebrate: 1, treat: .7, romance: .6 }, 落ち着いた: { relief: .8, heal: .7 },
+  にぎやか: { fun: .9, energy: .5 }, おしゃれ: { romance: .6, excite: .4, joy: .3 }, 個室あり: { talk: .7, relief: .4 },
+  カウンター: { solo: .5, talk: .4, excite: .3 }, 夜景: { romance: .9, moved: .6 }, テラス席: { joy: .5, heal: .4, excite: .3 },
+  カジュアル: { fun: .5, relief: .4 }, 一人でも: { solo: 1, relief: .4 }, 大人数OK: { fun: .9, joy: .4 },
+  // ジャンル
+  和食: { relief: .6, nostalgia: .5 }, 寿司: { treat: .8, celebrate: .5, moved: .4 }, 焼肉: { energy: .9, fun: .6, celebrate: .4, treat: .4 },
+  焼き鳥: { fun: .5, talk: .5, nostalgia: .3 }, ラーメン: { energy: .7, solo: .5, relief: .4 }, 'そば・うどん': { relief: .7, heal: .4, solo: .3 },
+  居酒屋: { fun: .8, talk: .7 }, イタリアン: { romance: .6, joy: .5, fun: .4 }, フレンチ: { romance: .7, celebrate: .7, treat: .7, moved: .5 },
+  中華: { energy: .6, fun: .6 }, 韓国料理: { energy: .7, fun: .6, excite: .3 }, エスニック: { excite: .8, energy: .5 },
+  カレー: { energy: .8, excite: .3, relief: .3 }, ハンバーガー: { energy: .6, fun: .5, excite: .3 }, カフェ: { heal: .8, relief: .7, solo: .5 },
+  スイーツ: { sweet: 1, joy: .7, heal: .5, treat: .5 }, パン: { relief: .5, joy: .4, heal: .3 }, バー: { talk: .8, romance: .5, solo: .4 },
+};
+// 登録時のタグ名に無い（自由に追加された）タグやメモは、含まれる言葉で判断する
+const KEYWORD_EMOTIONS = [
+  [/記念|誕生日|バースデー|お祝い|祝/, { celebrate: .8 }], [/デート|恋人|彼女|彼氏/, { romance: .7 }], [/ご褒美|贅沢|奮発/, { treat: .8 }],
+  [/肉|ステーキ|ホルモン|ジンギスカン/, { energy: .7 }], [/甘|ケーキ|パフェ|プリン|アイス|チョコ|和菓子/, { sweet: .8, joy: .4 }],
+  [/酒|ワイン|ビール|日本酒|バル/, { talk: .6, fun: .4 }], [/喫茶|コーヒー|紅茶|茶/, { heal: .6, relief: .5 }],
+  [/ジビエ|珍しい|初めて|新しい|話題/, { excite: .7 }], [/レトロ|昭和|老舗|懐かし|定食|食堂/, { nostalgia: .7, relief: .4 }],
+  [/景色|眺め|夜景|絶景/, { moved: .6, romance: .5 }], [/海鮮|魚|鮨|寿司/, { treat: .5 }], [/一人|ひとり|ソロ/, { solo: .8 }],
+  [/静か|落ち着/, { relief: .6, heal: .5 }], [/にぎやか|ワイワイ|わいわい|宴会|飲み会/, { fun: .8 }],
+];
+function shopEmotions(s) {
+  const v = {};
+  const add = (map, scale = 1) => { for (const [e, w] of Object.entries(map)) v[e] = Math.max(v[e] || 0, w * scale); };
+  for (const t of [...s.genres, ...s.moods]) {
+    if (TAG_EMOTIONS[t]) add(TAG_EMOTIONS[t]);
+    else for (const [re, map] of KEYWORD_EMOTIONS) if (re.test(t)) add(map);
+  }
+  for (const [re, map] of KEYWORD_EMOTIONS) if (re.test(s.memo || '')) add(map, .7); // メモは少し控えめに
+  if (s.rating >= 3.8) add({ moved: .8, treat: .4 }); else if (s.rating >= 3.5) add({ moved: .5, treat: .3 });
+  return v;
+}
+// お店に表示する気分タグ（強いものから最大3つ）
+const topEmotions = (v, n = 3) => Object.entries(v).filter(([, w]) => w >= .5).sort((a, b) => b[1] - a[1]).slice(0, n).map(([e]) => e);
+
+// 検索語 → 気分。言い換えと、今の状態（疲れた等）から欲しくなる気分への読み替え
+const EMOTION_WORDS = [
+  [['うれしい', '嬉しい', '幸せ', 'しあわせ', 'ハッピー', '喜び', 'よろこび', '最高', 'ごきげん', 'ご機嫌', 'るんるん', 'にこにこ'], { joy: 1 }],
+  [['楽しい', 'たのしい', 'わいわい', '盛り上がり', '盛り上が', 'はしゃ', '遊びたい', 'パーティ', '宴会', '飲み会'], { fun: 1 }],
+  [['わくわく', '冒険', '刺激', '挑戦', '珍しい', '興奮', '新しい'], { excite: 1 }],
+  [['どきどき'], { excite: .8, romance: .8 }],
+  [['ときめき', 'ときめく', 'ロマンチック', 'ろまんちっく', 'デート', '恋', 'きゅん'], { romance: 1 }],
+  [['お祝い', 'お祝', '祝い', '祝う', '記念日', '誕生日', 'バースデー', '合格', '昇進', '乾杯', '晴れ'], { celebrate: 1 }],
+  [['ご褒美', 'ごほうび', '贅沢', 'ぜいたく', '奮発', 'リッチ', '頑張った', 'がんばった'], { treat: 1 }],
+  [['ほっと', '安心', 'ほっこり', '落ち着き', '落ち着く', '和み', 'なごみ', 'なごむ', '和む'], { relief: 1 }],
+  [['癒やし', '癒し', 'いやし', '癒やされ', '癒され', 'いやされ', 'リラックス', 'のんびり', 'ゆっくり', 'まったり'], { heal: 1 }],
+  [['元気', 'げんき', 'がっつり', 'スタミナ', 'パワー', '気合', 'やる気', '腹ぺこ', 'はらぺこ', 'お腹すいた', 'おなかすいた'], { energy: 1 }],
+  [['甘いもの', '甘い', 'あまい', '甘えたい'], { sweet: 1, romance: .3 }],
+  [['懐かしい', 'なつかしい', 'レトロ', '昭和', 'ノスタルジ'], { nostalgia: 1 }],
+  [['ひとり', '一人', 'おひとりさま', 'ソロ', '静かに', '集中'], { solo: 1 }],
+  [['語りたい', '語り合', '話したい', 'しっぽり', 'じっくり', '相談', '本音'], { talk: 1 }],
+  [['感動', 'びっくり', '驚き', '絶品', '一流'], { moved: 1 }],
+  // 今の状態 → 欲しくなる気分
+  [['疲れ', 'つかれ', 'へとへと', 'くたくた', 'しんどい'], { heal: 1, relief: .8, energy: .6, sweet: .5 }],
+  [['落ち込', 'かなしい', '悲しい', '凹ん', 'へこん', 'つらい', '辛い'], { relief: 1, heal: .7, sweet: .7, energy: .5 }],
+  [['寂しい', 'さみしい', 'さびしい'], { talk: .9, relief: .7, fun: .5 }],
+  [['いらいら', 'むしゃくしゃ', 'ストレス'], { energy: .9, fun: .6, heal: .5 }],
+  [['暇', 'ひま', '退屈'], { excite: .9, fun: .7 }],
+  [['緊張', '不安'], { relief: .8, heal: .6 }],
+];
+// カタカナ→ひらがな、全角英数→半角、小文字化（表記ゆれを吸収）
+const normJa = t => String(t || '').normalize('NFKC').toLowerCase().replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+const EMOTION_LEXICON = (() => {
+  const list = [];
+  for (const [words, map] of EMOTION_WORDS) for (const w of words) list.push([normJa(w), map]);
+  for (const [id, label] of Object.entries(EMOTIONS)) list.push([normJa(label), { [id]: 1 }]); // 表示名でも検索できる
+  return list;
+})();
+// 1つの検索語を気分に読み替える（含む／入力途中の前方一致も可）。読めなければ null
+function emotionsOfWord(token) {
+  const t = normJa(token).replace(/[!！?？。、〜~ー]+$/, '');
+  if (t.length < 2) return null;
+  const v = {};
+  for (const [key, map] of EMOTION_LEXICON) {
+    let k = 0;
+    // 短い気分語（例: ひま）が長い単語（例: ひまわり）の一部に入っているだけのときは気分として扱わない
+    if (t.includes(key) && !(key.length <= 2 && t.length > key.length + 1)) k = 1;
+    else if (t.length >= 3 && key.startsWith(t)) k = .9; // 入力途中（例: うれし）
+    if (k) for (const [e, w] of Object.entries(map)) v[e] = Math.max(v[e] || 0, w * k);
+  }
+  return Object.keys(v).length ? v : null;
+}
+// 検索語の気分に、近い気分も加える
+function expandEmotions(v) {
+  const out = { ...v };
+  // 近い気分は少し控えめに（そのものズバリの気分のお店が先に来るように）
+  for (const [e, w] of Object.entries(v)) for (const [n, s] of Object.entries(nearOf(e))) out[n] = Math.max(out[n] || 0, w * s * .85);
+  return out;
+}
+// 検索文を「気分」と「それ以外の言葉」に分ける
+function parseSearch(q) {
+  const raw = String(q || '').trim().split(/\s+/).filter(Boolean);
+  const direct = {}, rest = [], words = [];
+  const isLexWord = t => EMOTION_LEXICON.some(([key]) => key === t);
+  const inShops = t => db.shops.some(s => normJa([s.name, s.area, s.memo, ...s.genres, ...s.moods].join(' ')).includes(t));
+  for (const r of raw) {
+    const t = normJa(r);
+    const v = emotionsOfWord(t);
+    // 気分の言葉そのもの（例: デート）でなく、お店の名前やメモにそのまま入っている言葉（例: ひまわり）は文字で探す
+    if (v && (isLexWord(t.replace(/[!！?？。、〜~ー]+$/, '')) || !inShops(t))) { words.push(r); for (const [e, w] of Object.entries(v)) direct[e] = Math.max(direct[e] || 0, w); }
+    else rest.push(t);
+  }
+  return { rest, words, direct, query: Object.keys(direct).length ? expandEmotions(direct) : null };
+}
+const EMOTION_MIN_SCORE = .4;
+// お店の点数（どれだけ検索した気分に近いか）と、その理由になった気分
+function emotionMatch(s, query) {
+  const sv = shopEmotions(s);
+  let score = 0;
+  const parts = [];
+  for (const [e, qw] of Object.entries(query)) {
+    const c = qw * (sv[e] || 0);
+    if (c > 0) { score = Math.max(score, c) + Math.min(score, c) * .25; parts.push([e, c]); } // いちばん合う気分を主に、ほかは少し加点
+  }
+  return { score: Math.min(score, 1.5), reasons: parts.filter(([, c]) => c >= .25).sort((a, b) => b[1] - a[1]).map(([e]) => e) };
+}
+
 function filtered() {
-  const tokens = ui.q.toLowerCase().split(/\s+/).filter(Boolean);
+  // 気分として読める言葉は気分で探し、それ以外の言葉は店名・エリア・メモ・タグの文字で探す
+  const search = parseSearch(ui.q);
+  const tokens = search.rest;
+  ui.emotionSearch = search.query ? search : null;
+  ui.emoScores = new Map();
   const hit = (tags, sel) => !sel.size || (ui.match === 'all' ? [...sel].every(v => tags.includes(v)) : tags.some(v => sel.has(v)));
   return db.shops.filter(s => {
     if (ui.status === 'want' && s.visited) return false;
@@ -1536,9 +1699,14 @@ function filtered() {
     if (ui.areas.size && !ui.areas.has(s.area || NO_AREA)) return false;
     if (!hit(s.genres, ui.genres)) return false;
     if (!hit(s.moods, ui.moods)) return false;
-    if (tokens.length) {
-      const hay = [s.name, s.area, s.memo, ...s.genres, ...s.moods].join(' ').toLowerCase();
-      if (!tokens.every(t => hay.includes(t))) return false;
+    const hay = normJa([s.name, s.area, s.memo, ...s.genres, ...s.moods].join(' '));
+    if (tokens.length && !tokens.every(t => hay.includes(t))) return false;
+    if (search.query) {
+      const m = emotionMatch(s, search.query);
+      // 店名・メモ等にその言葉そのものが入っているお店は、気分の点数に関係なく先頭に出す（例: 店名「ひまわり」）
+      if (search.words.every(w => hay.includes(normJa(w)))) m.score = 2;
+      else if (m.score < EMOTION_MIN_SCORE) return false;
+      ui.emoScores.set(s.id, m);
     }
     return true;
   });
@@ -1553,6 +1721,8 @@ function sorted(list) {
     want: (a, b) => (a.visited - b.visited) || (b.createdAt - a.createdAt),
     rating: (a, b) => ((b.rating ?? 0) - (a.rating ?? 0)) || (b.createdAt - a.createdAt),
   }[ui.sort] || ((a, b) => b.createdAt - a.createdAt);
+  // 気分で検索しているときは、気分に近い順
+  if (ui.emotionSearch) return [...list].sort((a, b) => (ui.emoScores.get(b.id)?.score || 0) - (ui.emoScores.get(a.id)?.score || 0) || by(a, b));
   return [...list].sort(by);
 }
 function activeFilterCount() {
@@ -1594,7 +1764,18 @@ function renderFilterGroup(el, kind, values, sel, counts, emptyText) {
     ? list.map(v => chip(kind, v, sel.has(v), counts[v] || 0)).join('')
     : `<span class="muted small">${emptyText}</span>`;
 }
+// 「気分で探す」：お店に付いている気分をチップで出し、タップでその気分を検索する
+function renderEmotionChips() {
+  const counts = {};
+  for (const s of db.shops) for (const e of topEmotions(shopEmotions(s))) counts[e] = (counts[e] || 0) + 1;
+  const cur = normJa(ui.q.trim());
+  const ids = Object.keys(EMOTIONS).filter(e => counts[e]);
+  $('#fEmotion').innerHTML = ids.length
+    ? ids.map(e => { const on = cur === normJa(EMOTIONS[e]); return `<button type="button" class="chip${on ? ' on' : ''}" data-action="emo-search" data-val="${esc(EMOTIONS[e])}" aria-pressed="${on}">${esc(EMOTIONS[e])}<span class="n">${counts[e]}</span></button>`; }).join('')
+    : '<span class="muted small">ジャンルや雰囲気を登録すると、お店に合う気分が表示されます</span>';
+}
 function renderFilters() {
+  renderEmotionChips();
   $('#filterBody').hidden = !ui.filtersOpen;
   $('#filterToggle').setAttribute('aria-expanded', String(ui.filtersOpen));
   $('#filterBadge').textContent = activeFilterCount() || '';
@@ -1641,7 +1822,15 @@ function selectCardHTML(s) {
     ${s.image ? `<div class="card-img"><img class="shop-img" src="${esc(s.image)}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>` : ''}
     <div><h3>${esc(s.name)}</h3>${ratingHTML(s)}<div class="area">${esc(s.area || NO_AREA)}${s.visited ? '・行った' : ''}</div></div>
     ${tags ? `<div class="tags">${tags}</div>` : ''}
+    ${emotionsHTML(s)}
   </article>`;
+}
+// 気分タグ（検索した気分に合ったものは強調）
+function emotionsHTML(s) {
+  const hits = ui.emoScores?.get(s.id)?.reasons || [];
+  const shown = uniq([...hits.slice(0, 2), ...topEmotions(shopEmotions(s))]).slice(0, 4);
+  if (!shown.length) return '';
+  return `<div class="emos" aria-label="このお店の気分">${shown.map(e => `<span class="emo${hits.includes(e) ? ' hit' : ''}">${esc(EMOTIONS[e])}</span>`).join('')}</div>`;
 }
 function cardHTML(s, opts = {}) {
   const tags = [
@@ -1660,6 +1849,7 @@ function cardHTML(s, opts = {}) {
       <button class="visit${s.visited ? ' on' : ''}" data-action="toggle-visited" data-id="${esc(s.id)}" aria-pressed="${s.visited}" aria-label="${s.visited ? '行った（押すと行きたいに戻す）' : '行きたい（押すと行ったにする）'}">${s.visited ? '✓ 行った' : '行きたい'}</button>
     </div>
     ${tags ? `<div class="tags">${tags}</div>` : ''}
+    ${emotionsHTML(s)}
     ${s.memo ? `<p class="memo">${esc(s.memo)}</p>` : ''}
     <div class="links">${linksHTML(s)}</div>
     <div class="card-foot">
@@ -1673,7 +1863,12 @@ function renderList() {
   $('#sort').value = ui.sort;
   const list = sorted(filtered());
   const total = db.shops.length;
-  $('#resultCount').textContent = total ? `${list.length} / ${total} 件を表示` : '';
+  const es = ui.emotionSearch;
+  $('#resultCount').innerHTML = !total ? '' : es
+    ? `「${esc(es.words.join(' '))}」に近い気分のお店 <b>${list.length}</b>件（${Object.entries(es.direct).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([e]) => esc(EMOTIONS[e])).join('・')} など／近い順）`
+    : `${list.length} / ${total} 件を表示`;
+  $('#resultCount').classList.toggle('emo-msg', !!es);
+  $('#sort').disabled = !!es;
   const el = $('#cards');
   if (!session.loaded) {
     el.innerHTML = '<div class="empty" style="grid-column:1/-1"><p>読み込み中…</p></div>';
@@ -3047,6 +3242,13 @@ document.addEventListener('click', async e => {
     }
     case 'geocode': runGeocode(); break;
     case 'remove-image': form.image = ''; form.imageFrom = tabelogTop($('#fTabelog').value) || ''; form.imageHidden = true; form.imageState = ''; renderImagePreview(); break;
+    case 'emo-search': {
+      const v = normJa(ui.q.trim()) === normJa(a.dataset.val) ? '' : a.dataset.val; // もう一度押すと解除
+      ui.q = v;
+      $('#q').value = v;
+      render();
+      break;
+    }
     case 'appear-reset': setAppearance({ bg: '', accent: '', pattern: '' }); break;
     case 'copy-error': copyErrorReport(a.closest('.err-box')); break;
     case 'refetch-image': { const t = tabelogTop($('#fTabelog').value); infoCache.delete(t); lsInfo(t, null); fetchFormImage({ applyGenres: !form.genresApplied }); break; }
