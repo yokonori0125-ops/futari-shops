@@ -295,7 +295,7 @@
   .tabbar .tab-add span.lbl { display: none; }
   @media (min-width: 900px) {
     :root { --bar-h: 0px; }
-    #app { padding-bottom: 40px; }
+    #app { padding-bottom: 112px; } /* 右下の＋ボタンに最後のカードが隠れないように */
     .tabbar {
       position: sticky; top: 56px; height: auto; padding: 0; grid-template-columns: none; display: flex; justify-content: center; gap: 8px;
       border-top: 0; border-bottom: 1px solid var(--border); z-index: 999;
@@ -303,10 +303,21 @@
     .tabbar button { flex-direction: row; gap: 8px; font-size: 14.5px; padding: 12px 18px; height: auto; }
     .tabbar button[aria-selected="true"]::after { display: none; }
     .tabbar button[aria-selected="true"] { box-shadow: inset 0 -3px 0 var(--accent); }
-    .tabbar .tab-add { order: 3; margin-left: 12px; }
-    .tabbar .tab-add .plus { width: auto; height: 40px; padding: 0 16px; border-radius: 10px; box-shadow: none; display: flex; gap: 6px; font-size: 14.5px; }
-    .tabbar .tab-add span.lbl { display: inline; }
-    .tabbar .tab-add .plus svg.i { width: 20px; height: 20px; }
+    /* PC：お店の追加は画面右下の丸い＋ボタン */
+    .tabbar .tab-add {
+      position: fixed; right: 28px; bottom: 28px; z-index: 1150; padding: 0; height: auto; border-radius: 50%;
+    }
+    .tabbar .tab-add .plus {
+      width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center;
+      box-shadow: 0 8px 24px rgba(27, 42, 78, .28); transition: transform .15s, box-shadow .15s;
+    }
+    .tabbar .tab-add:hover .plus { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(27, 42, 78, .32); }
+    .tabbar .tab-add:focus-visible { outline: none; }
+    .tabbar .tab-add:focus-visible .plus { outline: 3px solid var(--navy); outline-offset: 3px; }
+    .tabbar .tab-add .plus svg.i { width: 30px; height: 30px; stroke-width: 2.6; }
+    .tabbar .tab-add span.lbl { display: none; }
+    /* 設定画面と、まとめて削除の選択中は表示しない（下部のバーや設定に重ならないように） */
+    body[data-view="settings"] .tabbar .tab-add, body.selecting .tabbar .tab-add { display: none; }
   }
 
   main.wrap { padding-top: 16px; }
@@ -680,7 +691,7 @@
 </header>
 <nav class="tabbar" role="tablist" aria-label="メインメニュー">
   <button role="tab" data-tab="list" aria-selected="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg><span>一覧</span></button>
-  <button class="tab-add" id="addBtn" aria-label="お店を追加"><span class="plus"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">お店を追加</span></span></button>
+  <button class="tab-add" id="addBtn" aria-label="お店を追加" title="お店を追加"><span class="plus"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">お店を追加</span></span></button>
   <button role="tab" data-tab="map" aria-selected="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><span>マップ</span></button>
 </nav>
 <div class="select-bar" id="selectBar" hidden role="region" aria-label="選択中の操作">
@@ -1747,6 +1758,7 @@ function render() {
   $('#tab-map').hidden = ui.tab !== 'map';
   $('#tab-settings').hidden = ui.tab !== 'settings';
   $('#filters').hidden = ui.tab === 'settings';
+  document.body.dataset.view = ui.tab; // ※ data-tab はタブボタンの判定に使うので別名にする
 
   if (ui.tab !== 'settings') renderFilters();
   if (ui.tab === 'list') renderList();
